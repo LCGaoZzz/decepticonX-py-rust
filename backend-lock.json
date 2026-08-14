@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "components": {
+    "reference_builders": {
+      "repository": "https://github.com/LCGaoZzz/decepticon-fast",
+      "commit": "512c9c9d47b3e3a735f17e882aff07460560cb4c"
+    },
+    "cibersort": {
+      "repository": "https://github.com/LCGaoZzz/python-cibersort-rs",
+      "commit": "cd957af06357d2636ba18af1135bf70b488dfbbb",
+      "tag": "v0.1.1"
+    },
+    "epic": {
+      "repository": "https://github.com/LCGaoZzz/epic-py-rust",
+      "commit": "2e661cccb5c9d7c8327bd65253e3495a1d3c1991",
+      "access": "private-authorized-checkout-required"
+    },
+    "deconrnaseq": {
+      "repository": "https://github.com/LCGaoZzz/deconrnaseq-py",
+      "commit": "a2ec1b9ebe341628e945a6d25c6068cad975f6b5"
+    },
+    "music": {
+      "repository": "https://github.com/LCGaoZzz/music-py",
+      "commit": "a4464c84f87fbeb61f0fa7032625bad21add52dd"
+    }
+  }
+}
