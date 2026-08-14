@@ -3,7 +3,7 @@
   "components": {
     "reference_builders": {
       "repository": "https://github.com/LCGaoZzz/decepticon-fast",
-      "commit": "512c9c9d47b3e3a735f17e882aff07460560cb4c"
+      "commit": "a98b66c7da5fad81ba6a1eaddb9c826daac31fad"
     },
     "cibersort": {
       "repository": "https://github.com/LCGaoZzz/python-cibersort-rs",

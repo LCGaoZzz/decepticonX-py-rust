@@ -257,6 +257,13 @@ def _music2_mean_reference(
 
     label_values = labels.loc[sc_common.columns].to_numpy(dtype=object)
     cell_types = list(pd.unique(label_values))
+    minimum = max(2, len(cell_types))
+    if len(genes) < minimum:
+        raise InputValidationError(
+            "MuSiC2 has too few genes after bulk non-zero and marker filtering "
+            f"({len(genes)} found; at least {minimum} required for "
+            f"{len(cell_types)} cell type(s))."
+        )
     values = sc_common.loc[genes].to_numpy(dtype=np.float64)
     result = np.empty((len(genes), len(cell_types)), dtype=np.float64)
     for column, cell_type in enumerate(cell_types):
@@ -347,6 +354,40 @@ def build_references(
             )
 
         else:  # music2
+            common_count = int(sc_common.shape[0])
+            provenance = getattr(prepared, "provenance", {}) or {}
+            source_gene_count_value = provenance.get("n_genes_source")
+            try:
+                source_gene_count = int(source_gene_count_value)
+            except (TypeError, ValueError):
+                source_gene_count = sum(
+                    str(gene) != remainder_gene for gene in prepared.adata.var_names
+                )
+            if source_gene_count < common_count:
+                raise InputValidationError(
+                    "Prepared single-cell provenance reports fewer source genes "
+                    f"({source_gene_count}) than the observed common-gene count "
+                    f"({common_count})."
+                )
+            comparison_gene_count = min(int(bulk.shape[0]), source_gene_count)
+            overlap_fraction = common_count / comparison_gene_count
+            if common_count < 0.2 * comparison_gene_count:
+                raise InputValidationError(
+                    "MuSiC2 has insufficient bulk/single-cell gene overlap "
+                    f"({common_count}/{comparison_gene_count}, "
+                    f"{overlap_fraction:.1%}); the original DECEPTICONx gate "
+                    "requires at least 20%."
+                )
+
+            cell_type_count = int(labels.nunique())
+            minimum = max(2, cell_type_count)
+            if common_count < minimum:
+                raise InputValidationError(
+                    "MuSiC2 common-gene matrix is not identifiable "
+                    f"({common_count} genes for {cell_type_count} cell type(s); "
+                    f"at least {minimum} genes required)."
+                )
+
             result = _coerce_signature(
                 _music2_mean_reference(
                     sc_common, bulk_common, labels, markers=markers
@@ -362,6 +403,11 @@ def build_references(
                 # sole execution path.
                 "upstream_legacy_call_skipped": True,
                 "corrected_mean_expression": True,
+                "source_gene_count": source_gene_count,
+                "bulk_gene_count": int(bulk.shape[0]),
+                "overlap_denominator_gene_count": comparison_gene_count,
+                "overlap_fraction": overlap_fraction,
+                "minimum_identifiable_gene_count": minimum,
                 "expression_scale": (
                     "normalized_compatibility"
                     if prepared.normalized_input

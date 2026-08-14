@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import anndata as ad
@@ -150,3 +151,25 @@ def test_only_hs_species_is_accepted(
         build_references(
             prepared_fixture, bulk, references=("music2",), species="mm"
         )
+
+
+def test_music2_enforces_the_original_twenty_percent_overlap_gate(
+    monkeypatch: pytest.MonkeyPatch, prepared_fixture: PreparedSingleCell
+) -> None:
+    calls: dict = {}
+    _install_fake_fast(monkeypatch, calls)
+    prepared = replace(
+        prepared_fixture,
+        provenance={
+            **prepared_fixture.provenance,
+            "n_genes_source": 20,
+        },
+    )
+    bulk = pd.DataFrame(
+        np.ones((11, 1)),
+        index=["g1", "g2", *[f"bulk_only_{index}" for index in range(9)]],
+        columns=["s1"],
+    )
+
+    with pytest.raises(InputValidationError, match="requires at least 20%"):
+        build_references(prepared, bulk, references=("music2",))

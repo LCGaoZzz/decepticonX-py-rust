@@ -43,8 +43,11 @@ def test_run_command_builds_config_and_forwards_output(monkeypatch, tmp_path, ca
             "4",
             "--consensus-pairs",
             "1",
+            "--consensus-mode",
+            "corrected",
             "--no-cibersort-qn",
             "--permissive",
+            "--allow-partial-consensus",
             "--epic-mrna-json",
             '{"B": 1.2, "T": 2.3}',
             "--epic-solver",
@@ -58,8 +61,10 @@ def test_run_command_builds_config_and_forwards_output(monkeypatch, tmp_path, ca
     assert config.references == ("music2",)
     assert config.threads == 4
     assert config.consensus_pairs == 1
+    assert config.consensus_mode == "corrected"
     assert config.cibersort_qn is False
     assert config.strict_backends is False
+    assert config.allow_partial_consensus is True
     assert config.epic_mrna_cell == {"B": 1.2, "T": 2.3}
     assert config.epic_solver == "nm"
     assert captured["output_dir"] == str(output)

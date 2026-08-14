@@ -177,6 +177,15 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--threads", type=int, default=None)
     parser.add_argument("--consensus-pairs", "--n-pairs", type=int, default=None)
+    parser.add_argument(
+        "--consensus-mode",
+        choices=("r_literal", "corrected"),
+        default=None,
+        help=(
+            "consensus selector: R positional selection (default) or the "
+            "structure-aware corrected selector"
+        ),
+    )
     strict = parser.add_mutually_exclusive_group()
     strict.add_argument(
         "--strict-backends",
@@ -191,6 +200,20 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
         action="store_false",
         dest="strict_backends",
         help="skip unavailable/failed branches and record them in diagnostics",
+    )
+    partial = parser.add_mutually_exclusive_group()
+    partial.add_argument(
+        "--allow-partial-consensus",
+        action="store_true",
+        dest="allow_partial_consensus",
+        default=None,
+        help="allow a consensus after permissive mode skips requested branches",
+    )
+    partial.add_argument(
+        "--require-complete-consensus",
+        action="store_false",
+        dest="allow_partial_consensus",
+        help="reject a partial branch set (the default)",
     )
     parser.add_argument(
         "--epic-mrna-cell",
@@ -294,7 +317,9 @@ def _config_from_arguments(args: argparse.Namespace, *, run: bool) -> PipelineCo
             "cibersort_seed",
             "threads",
             "consensus_pairs",
+            "consensus_mode",
             "strict_backends",
+            "allow_partial_consensus",
             "cibersort_engine",
             "epic_backend",
             "epic_solver",

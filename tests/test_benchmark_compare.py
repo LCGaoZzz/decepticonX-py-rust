@@ -7,6 +7,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from decepticonx.models import BranchKey
+
 
 SCRIPT = (
     Path(__file__).parents[1]
@@ -28,6 +30,30 @@ def test_align_samples_accepts_only_complete_unique_numeric_suffix_mapping() -> 
 
     assert list(aligned.index) == list(target)
     assert aligned["A"].tolist() == [10.0, 20.0]
+
+
+def test_align_estimate_preserves_only_epic_other_cells_auxiliary() -> None:
+    frame = pd.DataFrame(
+        {
+            "B cell": [0.3, 0.4],
+            "T cell": [0.5, 0.4],
+            "otherCells": [0.2, 0.2],
+            "diagnostic": [99.0, 99.0],
+        },
+        index=["s2", "s1"],
+    )
+    samples = pd.Index(["s1", "s2"])
+
+    epic = COMPARE.align_estimate(
+        frame, ["B cell", "T cell"], samples, method="epic"
+    )
+    other = COMPARE.align_estimate(
+        frame, ["B cell", "T cell"], samples, method="music"
+    )
+
+    assert list(epic.columns) == ["B cell", "T cell", "otherCells"]
+    assert list(other.columns) == ["B cell", "T cell"]
+    assert epic.loc["s1", "otherCells"] == 0.2
 
 
 @pytest.mark.parametrize(
@@ -148,3 +174,32 @@ def test_truth_frame_rejects_invalid_proportions(
 
     with pytest.raises(ValueError, match=message):
         COMPARE.truth_frame(path)
+
+
+def test_stored_consensus_validation_uses_explicit_three_view_contract(
+    tmp_path: Path,
+) -> None:
+    samples = pd.Index(["s1", "s2", "s3", "s4"])
+    target_types = ["A", "B"]
+    estimates: dict[BranchKey, pd.DataFrame] = {}
+    base = pd.Series([0.1, 0.25, 0.7, 0.9], index=samples)
+    for method_index, method in enumerate(COMPARE.R_FILENAME_METHOD_ORDER):
+        for reference_index, reference in enumerate(COMPARE.REFERENCE_ORDER):
+            offset = 0.002 * (method_index + reference_index)
+            a = (base + offset).clip(upper=0.99)
+            estimates[BranchKey(method, reference)] = pd.DataFrame(
+                {"A": a, "B": 1.0 - a}, index=samples
+            )
+
+    expected = COMPARE.benchmark_consensus(estimates, target_types)
+    expected.primary.to_csv(tmp_path / "consensus.tsv", sep="\t")
+    expected.unclosed.to_csv(tmp_path / "consensus_unclosed.tsv", sep="\t")
+    expected.closed.to_csv(tmp_path / "consensus_closed.tsv", sep="\t")
+
+    recomputed, rows = COMPARE.checked_stored_consensus(
+        tmp_path, estimates, target_types, samples
+    )
+
+    pd.testing.assert_frame_equal(recomputed.primary, expected.primary)
+    assert [row["scale"] for row in rows] == ["primary", "unclosed", "closed"]
+    assert all(row["max_abs"] <= 1e-15 for row in rows)

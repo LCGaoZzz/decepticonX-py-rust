@@ -44,7 +44,9 @@ class PipelineConfig:
     cibersort_seed: int = 0
     threads: int = 1
     consensus_pairs: int = 2
+    consensus_mode: str = "r_literal"
     strict_backends: bool = True
+    allow_partial_consensus: bool = False
     epic_mrna_cell: Mapping[str, float] | None = None
     cibersort_engine: str = "rust"
     epic_backend: str = "auto"
@@ -60,7 +62,8 @@ class DecepticonXResult:
     signatures: dict[str, pd.DataFrame]
     estimates: dict[BranchKey, pd.DataFrame]
     consensus: pd.DataFrame
-    consensus_raw: pd.DataFrame
+    consensus_unclosed: pd.DataFrame
+    consensus_closed: pd.DataFrame
     diagnostics: dict[str, Any] = field(default_factory=dict)
     timings: dict[str, float] = field(default_factory=dict)
     provenance: dict[str, Any] = field(default_factory=dict)
@@ -85,7 +88,10 @@ class DecepticonXResult:
             frame.to_csv(estimates_dir / f"{key.slug}.tsv", sep="\t")
 
         self.consensus.to_csv(root / "consensus.tsv", sep="\t")
-        self.consensus_raw.to_csv(root / "consensus_raw.tsv", sep="\t")
+        self.consensus_unclosed.to_csv(
+            root / "consensus_unclosed.tsv", sep="\t"
+        )
+        self.consensus_closed.to_csv(root / "consensus_closed.tsv", sep="\t")
         metadata = {
             "diagnostics": self.diagnostics,
             "timings_seconds": self.timings,
@@ -96,6 +102,18 @@ class DecepticonXResult:
             encoding="utf-8",
         )
         return root
+
+    @property
+    def consensus_raw(self) -> pd.DataFrame:
+        """Backward-compatible alias for the pre-closure consensus."""
+
+        return self.consensus_unclosed
+
+    @property
+    def consensus_normalized(self) -> pd.DataFrame:
+        """Backward-compatible alias for the row-closed consensus."""
+
+        return self.consensus_closed
 
 
 def config_as_dict(config: PipelineConfig) -> dict[str, Any]:

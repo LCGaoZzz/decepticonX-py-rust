@@ -27,15 +27,18 @@ counts；三个 ref 构造算法都保留，五个解卷积方法都可用。EPI
 |---|---|
 | Reference construction | BayesPrism-style, Monocle3-style, corrected MuSiC2-style |
 | Deconvolution | CIBERSORT relative, CIBERSORT `sig.score` absolute, EPIC, DeconRNASeq, MuSiC |
-| Integration | Up to 15 method/reference branches and cross-reference correlation consensus |
+| Integration | Up to 15 method/reference branches and selectable R-literal/corrected cross-reference consensus |
 | Inputs | Backed or in-memory h5ad plus strict genes-by-samples CSV/TSV/TXT bulk matrix |
-| Outputs | Every signature, every branch estimate, normalized/raw consensus, timings, provenance, warnings, engines, and fit diagnostics |
+| Outputs | Every signature, every native branch estimate, mode-primary/unclosed/closed consensus, timings, provenance, warnings, engines, and fit diagnostics |
 
 CIBERSORT and CIBERSORT-ABS share one fit batch per reference. MuSiC follows
 DECEPTICON's custom-signature behavior: each signature becomes five identical
 pseudo-donors. The MuSiC2-style reference fixes two defects in the existing
 fast port (one scalar library-size multiplier and incorrect gene order) and
-does not execute the defective path merely for comparison.
+does not execute the defective path merely for comparison. It constructs each
+cell-type column as mean expression on raw counts, keeps genes in bulk order,
+enforces the original 20% bulk/single-cell overlap gate, and rejects
+non-identifiable common-gene designs.
 
 ## Requirements
 
@@ -253,6 +256,60 @@ Branch diagnostics retain
 `native_eligible`, and `backend_resolution_reason`. The branch-level `engines`
 entry contains `rust`, `python`, or `hybrid`.
 
+EPIC branch files retain the fitted `otherCells` column. It is not a target
+cell type, but it remains in the denominator when that branch is converted to
+composition space for consensus aggregation. Dropping it first would turn the
+reported target fractions into fractions conditional on the modelled cell
+types and would change the estimator.
+
+### Consensus modes
+
+The default `consensus_mode="r_literal"` reproduces the original R
+`optimal_id` selector and positional endpoint weighting: correlations are
+ranked in the deterministic R filename-equivalent, method-major order
+(`deconrnaseq`, `epic`, `cibersort_abs`, `cibersort`, `music`, each in the
+configured reference order). Masked positions are set to zero, ranks 1 and 3
+are selected, and every selected endpoint receives weight 0.25. Repeated,
+reversed, or self positions therefore retain their literal accumulated
+weights. `consensus_pairs` is fixed at 2 in this mode. Its primary
+`consensus.tsv` is the unclosed result, as in the selector's output semantics;
+rows need not sum to one.
+
+`consensus_mode="corrected"` admits only finite positive, unique unordered
+cross-reference pairs and uses up to `consensus_pairs`. If a cell type has no
+eligible pair, it falls back to a reference-balanced median: methods are first
+combined within each reference, then the references are combined so a
+reference with more methods cannot dominate. The corrected primary result is
+row-closed.
+
+Both modes deliberately separate selection from aggregation. Pearson
+correlations are computed from each branch's native target estimates, so
+CIBERSORT relative and absolute scores do not become artificially identical.
+For aggregation, every branch is first closed across all of its native output
+columns and only then restricted to target types; EPIC `otherCells` therefore
+stays in the denominator. Every branch must contain every target type. Missing
+types are errors and are never silently filled with zero.
+
+The original R custom-output `decostand` block has hard-coded/index-precedence
+errors and does not define a valid normalization result for the 15-strategy
+configuration. Consequently, `r_literal` means literal reproduction of the R
+selection and positional-weighting kernel, not a claim that the broken
+15-strategy normalization block was executed. The uniform all-native-column
+composition step above is the documented replacement shared by both modes.
+
+Choose the corrected estimator explicitly when desired:
+
+```bash
+decepticonx run cells.h5ad bulk.tsv -o results-corrected \
+  --consensus-mode corrected \
+  --consensus-pairs 2
+```
+
+Permissive backend execution does not implicitly authorize a consensus from a
+reduced strategy set. If `--permissive` skips any requested branch, the run
+still fails before consensus unless `--allow-partial-consensus` is supplied as
+an explicit scientific decision.
+
 Use a new or empty output directory. The writer refuses a non-empty directory
 so files from an earlier branch set cannot be mistaken for current results.
 
@@ -277,7 +334,9 @@ result = run_decepticonx(
     output_dir="results",
 )
 
-print(result.consensus)          # samples x cell types, rows sum to one
+print(result.consensus)          # mode-primary; default r_literal is unclosed
+print(result.consensus_unclosed) # pre-final-closure matrix
+print(result.consensus_closed)   # rows with positive mass sum to one
 print(result.signatures.keys())
 print(result.estimates.keys())
 print(result.diagnostics["backends"]["engines"])
@@ -298,9 +357,16 @@ results/
 │   ├── cibersort__bayesprism.tsv
 │   └── ...
 ├── consensus.tsv
-├── consensus_raw.tsv
+├── consensus_unclosed.tsv
+├── consensus_closed.tsv
 └── run.json
 ```
+
+`consensus.tsv` is the mode-primary view: it equals
+`consensus_unclosed.tsv` for the default `r_literal` mode and
+`consensus_closed.tsv` for `corrected`. The Python aliases
+`consensus_raw` and `consensus_normalized` remain available for compatibility,
+but new consumers should use the explicit unclosed/closed names.
 
 `run.json` records input scale/range, selected count layer, exclusions,
 component versions, requested and resolved engines, branch warnings, EPIC
@@ -376,7 +442,11 @@ workflow inside the existing environment.
   10.71 seconds for accelerated eight-thread execution, along with reference,
   branch, consensus, truth, and memory metrics. Its input defects limit those
   numbers to an operational compatibility smoke test; they do not support a
-  general speed or scientific accuracy claim.
+  general speed or scientific accuracy claim. That checked-in report predates
+  the final native-selection/all-column-aggregation consensus contract; retain
+  it as a commit-bound historical baseline, not as numerical validation of the
+  two modes documented above. The harness itself now emits and verifies the
+  final primary/unclosed/closed contract.
 - CI builds both sdist and wheel, installs the wheel, runs `pip check`, checks
   the CLI and byte-compilation, then runs the core test suite on Python 3.11
   and 3.12. Optional licensed/native integrations remain separate from public
@@ -391,9 +461,14 @@ workflow inside the existing environment.
 - `auto` backend selection can use a Python/NumPy fallback. Pass the explicit
   `rust` backend options to require acceleration; the resolved state is saved
   in `run.json`.
-- Consensus normalizes heterogeneous branch scales before correlations and
-  masks self-pairs and same-reference pairs. Undefined correlations use a
-  deterministic median fallback.
+- Consensus selection uses native target estimates, while aggregation uses
+  each branch closed over every native column. The default `r_literal` mode
+  preserves the R selector's zero masking, stable positional ranking, and
+  repeated endpoint weights; `corrected` uses positive unique cross-reference
+  pairs and a reference-balanced median only when none exist.
+- Every reference signature must expose exactly the same cell-type set, and
+  every completed branch must return all target types. Backend-skipped partial
+  consensus is rejected unless explicitly enabled.
 - This is research software, not a clinical diagnostic system.
 
 See [architecture and compatibility policy](docs/architecture.md) for the

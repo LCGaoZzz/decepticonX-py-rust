@@ -24,7 +24,16 @@ import pandas as pd
 
 from . import backends, consensus, io, references
 from .exceptions import InputValidationError
-from .models import DecepticonXResult, PipelineConfig, config_as_dict
+from .models import BranchKey, DecepticonXResult, PipelineConfig, config_as_dict
+
+
+_R_FILENAME_METHOD_ORDER = (
+    "deconrnaseq",
+    "epic",
+    "cibersort_abs",
+    "cibersort",
+    "music",
+)
 
 
 def _configuration(config: PipelineConfig | Mapping[str, Any] | None) -> PipelineConfig:
@@ -107,7 +116,12 @@ def _configuration(config: PipelineConfig | Mapping[str, Any] | None) -> Pipelin
         # Reference builders expose the deliberately narrow first-release
         # spelling ``hs`` even though input validation accepts common aliases.
         result.species = "hs"
-    for name in ("allow_normalized_x", "cibersort_qn", "strict_backends"):
+    for name in (
+        "allow_normalized_x",
+        "cibersort_qn",
+        "strict_backends",
+        "allow_partial_consensus",
+    ):
         if type(getattr(result, name)) is not bool:
             raise InputValidationError(f"{name} must be a JSON/Python boolean")
     for name in ("threads", "cibersort_seed", "consensus_pairs"):
@@ -125,6 +139,7 @@ def _configuration(config: PipelineConfig | Mapping[str, Any] | None) -> Pipelin
         "epic_solver": {"auto", "nm", "nmf", "qp"},
         "deconrnaseq_backend": {"auto", "rust", "numpy"},
         "music_backend": {"auto", "rust", "numpy"},
+        "consensus_mode": {"r_literal", "corrected"},
     }
     for name, choices in engine_choices.items():
         value = getattr(result, name)
@@ -133,6 +148,10 @@ def _configuration(config: PipelineConfig | Mapping[str, Any] | None) -> Pipelin
                 f"{name} must be one of: {', '.join(sorted(choices))}"
             )
         setattr(result, name, value.strip().lower())
+    if result.consensus_mode == "r_literal" and result.consensus_pairs != 2:
+        raise InputValidationError(
+            "r_literal consensus fixes consensus_pairs at 2 to match optimal_id"
+        )
     return result
 
 
@@ -192,34 +211,51 @@ def _backend_result(value: Any) -> tuple[dict[Any, pd.DataFrame], Any]:
     return dict(estimates), diagnostics
 
 
-def _consensus_result(value: Any) -> tuple[pd.DataFrame, pd.DataFrame, Any]:
-    """Extract normalized/raw consensus tables from the consensus stage."""
+def _consensus_result(
+    value: Any,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Any]:
+    """Extract primary, unclosed, and closed consensus tables."""
 
-    if hasattr(value, "normalized") and hasattr(value, "raw"):
-        normalized = value.normalized
-        raw = value.raw
+    if all(hasattr(value, name) for name in ("primary", "unclosed", "closed")):
+        primary = value.primary
+        unclosed = value.unclosed
+        closed = value.closed
+        diagnostics = getattr(value, "diagnostics", {})
+    elif hasattr(value, "normalized") and hasattr(value, "raw"):
+        # Compatibility with the initial alpha result object.
+        closed = value.normalized
+        unclosed = value.raw
+        primary = closed
         diagnostics = getattr(value, "diagnostics", {})
     elif isinstance(value, Mapping):
-        normalized = value.get("normalized", value.get("consensus"))
-        raw = value.get("raw", value.get("consensus_raw"))
+        unclosed = value.get(
+            "unclosed", value.get("raw", value.get("consensus_raw"))
+        )
+        closed = value.get(
+            "closed", value.get("normalized", value.get("consensus_normalized"))
+        )
+        primary = value.get("primary", value.get("consensus", closed))
         diagnostics = value.get("diagnostics", {})
-    elif isinstance(value, tuple) and len(value) in (2, 3):
-        # The documented order is raw followed by normalized.
-        raw, normalized = value[:2]
-        diagnostics = value[2] if len(value) == 3 else {}
+    elif isinstance(value, tuple) and len(value) in (2, 3, 4):
+        # Compatibility order: unclosed, closed, optional primary/diagnostics.
+        unclosed, closed = value[:2]
+        if len(value) == 4:
+            primary, diagnostics = value[2:]
+        else:
+            primary = closed
+            diagnostics = value[2] if len(value) == 3 else {}
     else:
         raise InputValidationError("consensus builder returned an invalid result")
-    if not isinstance(normalized, pd.DataFrame) or not isinstance(raw, pd.DataFrame):
+    if not all(
+        isinstance(frame, pd.DataFrame)
+        for frame in (primary, unclosed, closed)
+    ):
         raise InputValidationError("consensus builder did not return DataFrame outputs")
-    return normalized, raw, diagnostics
+    return primary, unclosed, closed, diagnostics
 
 
 def _cell_types(signatures: Mapping[str, pd.DataFrame]) -> tuple[str, ...]:
-    """Return the first-reference-ordered intersection of cell types.
-
-    This matches DECEPTICON's custom-signature output contract: only cell
-    types represented by every reference template participate in consensus.
-    """
+    """Require one identifiable cell-type schema across every reference."""
 
     frames = list(signatures.values())
     for signature in frames:
@@ -229,13 +265,40 @@ def _cell_types(signatures: Mapping[str, pd.DataFrame]) -> tuple[str, ...]:
             raise InputValidationError("signature matrices contain duplicate cell types")
     if not frames:
         raise InputValidationError("reference builders produced no signature matrices")
-    shared = set(str(value) for value in frames[0].columns)
-    for signature in frames[1:]:
-        shared.intersection_update(str(value) for value in signature.columns)
-    ordered = [str(value) for value in frames[0].columns if str(value) in shared]
+    ordered = tuple(str(value) for value in frames[0].columns)
+    expected = set(ordered)
     if not ordered:
-        raise InputValidationError("signature matrices have no shared cell types")
-    return tuple(ordered)
+        raise InputValidationError("signature matrices contain no cell types")
+    for name, signature in signatures.items():
+        actual = {str(value) for value in signature.columns}
+        if actual != expected:
+            missing = sorted(expected.difference(actual))
+            extra = sorted(actual.difference(expected))
+            raise InputValidationError(
+                f"signature {name!r} has a different cell-type schema "
+                f"(missing={missing}, extra={extra}); missing types cannot be "
+                "interpreted as zero estimates"
+            )
+    return ordered
+
+
+def _strategy_order(
+    estimates: Mapping[BranchKey, pd.DataFrame],
+    references: tuple[str, ...],
+) -> tuple[BranchKey, ...]:
+    """Return a stable C-locale equivalent of the R result-file order."""
+
+    available = set(estimates)
+    ordered = [
+        BranchKey(method=method, reference=reference)
+        for method in _R_FILENAME_METHOD_ORDER
+        for reference in references
+        if BranchKey(method=method, reference=reference) in available
+    ]
+    remainder = sorted(
+        available.difference(ordered), key=lambda key: (key.method, key.reference)
+    )
+    return tuple((*ordered, *remainder))
 
 
 def _package_version() -> str:
@@ -373,6 +436,8 @@ def run_decepticonx(
     )
     timings["references"] = perf_counter() - stage
 
+    cell_types = _cell_types(signatures)
+
     stage = perf_counter()
     estimates, backend_diagnostics = _backend_result(
         backends.run_backends(
@@ -393,12 +458,29 @@ def run_decepticonx(
     )
     timings["backends"] = perf_counter() - stage
 
+    skipped = dict(backend_diagnostics.get("skipped", {})) if isinstance(
+        backend_diagnostics, Mapping
+    ) else {}
+    if skipped and not cfg.allow_partial_consensus:
+        raise InputValidationError(
+            "one or more requested branches were skipped; set "
+            "allow_partial_consensus=True only when a partial consensus is "
+            "scientifically intentional (skipped: "
+            + ", ".join(sorted(skipped))
+            + ")"
+        )
+
     stage = perf_counter()
-    normalized, raw, consensus_diagnostics = _consensus_result(
+    primary, unclosed, closed, consensus_diagnostics = _consensus_result(
         consensus.build_consensus(
             estimates,
-            cell_types=_cell_types(signatures),
+            cell_types=cell_types,
             n_pairs=cfg.consensus_pairs,
+            mode=cfg.consensus_mode,
+            # Reference builders return their canonical names in requested
+            # order.  Use that realised order so case-normalised configuration
+            # spellings cannot perturb the R filename-equivalent tie break.
+            strategy_order=_strategy_order(estimates, tuple(signatures)),
         )
     )
     timings["consensus"] = perf_counter() - stage
@@ -422,7 +504,7 @@ def run_decepticonx(
         "component_versions": _component_versions(),
         "bulk": bulk_provenance,
         "single_cell": dict(getattr(prepared, "provenance", {})),
-        "cell_types": list(_cell_types(signatures)),
+        "cell_types": list(cell_types),
         "reference_names": list(signatures),
         "completed_branches": [
             getattr(key, "slug", str(key)) for key in estimates
@@ -432,8 +514,9 @@ def run_decepticonx(
     result = DecepticonXResult(
         signatures=signatures,
         estimates=estimates,
-        consensus=normalized,
-        consensus_raw=raw,
+        consensus=primary,
+        consensus_unclosed=unclosed,
+        consensus_closed=closed,
         diagnostics=diagnostics,
         timings=timings,
         provenance=provenance,

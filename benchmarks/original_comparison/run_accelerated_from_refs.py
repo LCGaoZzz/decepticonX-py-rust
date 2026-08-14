@@ -23,6 +23,7 @@ import pandas as pd
 from decepticonx.backends import run_backends
 from decepticonx.consensus import build_consensus
 from decepticonx.io import load_bulk_expression
+from decepticonx.models import BranchKey
 
 
 REFERENCE_FILES = {
@@ -30,6 +31,13 @@ REFERENCE_FILES = {
     "bayesprism": "BayesPrism_base.txt",
     "music2": "MuSiC2_base.txt",
 }
+R_FILENAME_METHOD_ORDER = (
+    "deconrnaseq",
+    "epic",
+    "cibersort_abs",
+    "cibersort",
+    "music",
+)
 
 
 def arguments() -> argparse.Namespace:
@@ -282,7 +290,18 @@ def main() -> int:
         diagnostics[label] = details
 
     stage = perf_counter()
-    consensus = build_consensus(estimates, cell_types=target_types, n_pairs=2)
+    strategy_order = tuple(
+        BranchKey(method, reference)
+        for method in R_FILENAME_METHOD_ORDER
+        for reference in references
+    )
+    consensus = build_consensus(
+        estimates,
+        cell_types=target_types,
+        n_pairs=2,
+        mode="r_literal",
+        strategy_order=strategy_order,
+    )
     timings["consensus"] = perf_counter() - stage
     timings["compute_total"] = perf_counter() - started
 
@@ -295,8 +314,11 @@ def main() -> int:
         frame.to_csv(signature_dir / f"{name}.tsv", sep="\t")
     for key, frame in estimates.items():
         frame.to_csv(estimate_dir / f"{key.slug}.tsv", sep="\t")
-    consensus.normalized.to_csv(args.output / "consensus.tsv", sep="\t")
-    consensus.raw.to_csv(args.output / "consensus_raw.tsv", sep="\t")
+    consensus.primary.to_csv(args.output / "consensus.tsv", sep="\t")
+    consensus.unclosed.to_csv(
+        args.output / "consensus_unclosed.tsv", sep="\t"
+    )
+    consensus.closed.to_csv(args.output / "consensus_closed.tsv", sep="\t")
     timings["write"] = perf_counter() - stage
     timings["wall_internal"] = perf_counter() - started
 
@@ -317,6 +339,7 @@ def main() -> int:
             "component_versions": package_versions(),
             "epic_backend_requested": args.epic_backend,
             "epic_solver_requested": args.epic_solver,
+            "consensus_mode": "r_literal",
             "thread_environment": {
                 name: os.environ.get(name)
                 for name in (

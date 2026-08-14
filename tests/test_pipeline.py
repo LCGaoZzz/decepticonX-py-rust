@@ -63,8 +63,9 @@ def test_pipeline_connects_stages_records_metadata_and_writes(
     def make_consensus(estimates, **kwargs):
         calls["consensus"] = (estimates, kwargs)
         return SimpleNamespace(
-            raw=raw,
-            normalized=normalized,
+            primary=normalized,
+            unclosed=raw,
+            closed=normalized,
             diagnostics={"selected_pairs": 1},
         )
 
@@ -80,6 +81,7 @@ def test_pipeline_connects_stages_records_metadata_and_writes(
         references=("music2",),
         threads=3,
         consensus_pairs=1,
+        consensus_mode="corrected",
         strict_backends=False,
     )
     result = pipeline.run_decepticonx(
@@ -105,7 +107,12 @@ def test_pipeline_connects_stages_records_metadata_and_writes(
         "epic_solver": "auto",
         "music_backend": "auto",
     }
-    assert calls["consensus"][1] == {"cell_types": ("B", "T"), "n_pairs": 1}
+    assert calls["consensus"][1] == {
+        "cell_types": ("B", "T"),
+        "n_pairs": 1,
+        "mode": "corrected",
+        "strategy_order": (BranchKey("music", "music2"),),
+    }
     pd.testing.assert_frame_equal(result.consensus, normalized)
     pd.testing.assert_frame_equal(result.consensus_raw, raw)
     assert result.diagnostics["references"] == {"built": ["music2"]}
@@ -123,6 +130,8 @@ def test_pipeline_connects_stages_records_metadata_and_writes(
     assert result.provenance["bulk"]["n_samples"] == 2
     assert result.provenance["completed_branches"] == ["music__music2"]
     assert (output / "consensus.tsv").is_file()
+    assert (output / "consensus_unclosed.tsv").is_file()
+    assert (output / "consensus_closed.tsv").is_file()
     assert (output / "signatures" / "music2.tsv").is_file()
     metadata = json.loads((output / "run.json").read_text(encoding="utf-8"))
     assert metadata["provenance"]["config"]["threads"] == 3
@@ -179,10 +188,18 @@ def test_pipeline_loads_a_bulk_path_and_accepts_mapping_config(
     assert loaded == [bulk_path]
 
 
-def test_cell_types_use_first_reference_ordered_intersection() -> None:
+def test_cell_types_require_the_same_schema_and_keep_first_reference_order() -> None:
     first = pd.DataFrame([[1, 2, 3]], index=["G"], columns=["B", "T", "NK"])
-    second = pd.DataFrame([[1, 2, 3]], index=["G"], columns=["T", "B", "M"])
-    assert pipeline._cell_types({"first": first, "second": second}) == ("B", "T")
+    reordered = pd.DataFrame([[1, 2, 3]], index=["G"], columns=["T", "NK", "B"])
+    assert pipeline._cell_types({"first": first, "second": reordered}) == (
+        "B",
+        "T",
+        "NK",
+    )
+
+    mismatched = pd.DataFrame([[1, 2, 3]], index=["G"], columns=["T", "B", "M"])
+    with pytest.raises(InputValidationError, match="different cell-type schema"):
+        pipeline._cell_types({"first": first, "second": mismatched})
 
 
 @pytest.mark.parametrize(
@@ -202,6 +219,102 @@ def test_epic_solver_is_validated_and_canonicalized() -> None:
     assert pipeline._configuration({"epic_solver": " NM "}).epic_solver == "nm"
     with pytest.raises(InputValidationError, match="epic_solver must be one of"):
         pipeline._configuration({"epic_solver": "not-a-solver"})
+
+
+def test_r_literal_consensus_fixes_the_selector_at_two_pairs() -> None:
+    assert pipeline._configuration({"consensus_mode": " R_LITERAL "}).consensus_pairs == 2
+    with pytest.raises(InputValidationError, match="fixes consensus_pairs at 2"):
+        pipeline._configuration(
+            {"consensus_mode": "r_literal", "consensus_pairs": 1}
+        )
+    assert (
+        pipeline._configuration(
+            {"consensus_mode": "corrected", "consensus_pairs": 1}
+        ).consensus_pairs
+        == 1
+    )
+
+
+def test_strategy_order_matches_r_filename_order_then_configured_references() -> None:
+    estimates = {
+        BranchKey("music", "r2"): pd.DataFrame(),
+        BranchKey("cibersort", "r1"): pd.DataFrame(),
+        BranchKey("epic", "r2"): pd.DataFrame(),
+        BranchKey("deconrnaseq", "r1"): pd.DataFrame(),
+        BranchKey("cibersort_abs", "r2"): pd.DataFrame(),
+        BranchKey("custom", "r1"): pd.DataFrame(),
+    }
+    assert pipeline._strategy_order(estimates, ("r2", "r1")) == (
+        BranchKey("deconrnaseq", "r1"),
+        BranchKey("epic", "r2"),
+        BranchKey("cibersort_abs", "r2"),
+        BranchKey("cibersort", "r1"),
+        BranchKey("music", "r2"),
+        BranchKey("custom", "r1"),
+    )
+
+
+def test_partial_consensus_requires_a_separate_explicit_opt_in(monkeypatch) -> None:
+    bulk = _bulk()
+    prepared = SimpleNamespace(warnings=(), provenance={})
+    signature = pd.DataFrame(
+        [[8.0, 1.0], [2.0, 7.0]],
+        index=bulk.index,
+        columns=["B", "T"],
+    )
+    estimate = pd.DataFrame(
+        [[0.7, 0.3], [0.2, 0.8]],
+        index=bulk.columns,
+        columns=signature.columns,
+    )
+    consensus_calls: list[object] = []
+
+    monkeypatch.setattr(pipeline.io, "validate_bulk_expression", lambda value: value)
+    monkeypatch.setattr(pipeline.io, "prepare_single_cell", lambda *a, **k: prepared)
+    monkeypatch.setattr(
+        pipeline.references,
+        "build_references",
+        lambda *a, **k: (
+            {"music2": signature, "bayesprism": signature},
+            {},
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline.backends,
+        "run_backends",
+        lambda *a, **k: (
+            {BranchKey("music", "music2"): estimate},
+            {"skipped": {"music__bayesprism": "backend failed"}},
+        ),
+    )
+
+    def make_consensus(*args, **kwargs):
+        consensus_calls.append((args, kwargs))
+        return SimpleNamespace(
+            primary=estimate,
+            unclosed=estimate,
+            closed=estimate,
+            diagnostics={},
+        )
+
+    monkeypatch.setattr(pipeline.consensus, "build_consensus", make_consensus)
+    base = {
+        "methods": ["music"],
+        "references": ["music2", "bayesprism"],
+        "strict_backends": False,
+    }
+
+    with pytest.raises(InputValidationError, match="allow_partial_consensus=True"):
+        pipeline.run_decepticonx(object(), bulk, config=base)
+    assert consensus_calls == []
+
+    result = pipeline.run_decepticonx(
+        object(),
+        bulk,
+        config={**base, "allow_partial_consensus": True},
+    )
+    pd.testing.assert_frame_equal(result.consensus, estimate)
+    assert len(consensus_calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -260,7 +373,8 @@ def test_result_write_refuses_a_nonempty_output_directory(tmp_path) -> None:
         signatures={"music2": frame.T},
         estimates={BranchKey("music", "music2"): frame},
         consensus=frame,
-        consensus_raw=frame,
+        consensus_unclosed=frame,
+        consensus_closed=frame,
     )
     output = tmp_path / "result"
     result.write(output)

@@ -233,12 +233,65 @@ def _matrix(value: pd.DataFrame, *, name: str) -> pd.DataFrame:
 def _prepare_inputs(
     signature: pd.DataFrame,
     bulk: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """Validate one signature/bulk pair without changing backend preprocessing.
+
+    In particular, do not crop ``bulk`` here: CIBERSORT quantile-normalises the
+    complete mixture before taking its gene intersection.  Cropping centrally
+    would therefore change the algorithm.  The common rows are materialised
+    only for identifiability checks and diagnostics.
+    """
+
     sig = _matrix(signature, name="signature")
     mix = _matrix(bulk, name="bulk")
-    if not set(sig.index).intersection(mix.index):
-        raise InputValidationError("signature and bulk have no genes in common")
-    return sig, mix
+    common = sig.index[sig.index.isin(mix.index)]
+    n_common = int(len(common))
+    n_types = int(sig.shape[1])
+    minimum = max(2, n_types)
+    if n_common < minimum:
+        raise InputValidationError(
+            "signature and bulk have too few genes in common for an identifiable "
+            f"deconvolution ({n_common} found; at least {minimum} required for "
+            f"{n_types} cell type(s))"
+        )
+
+    common_signature = sig.loc[common]
+    common_values = common_signature.to_numpy(dtype=np.float64, copy=False)
+    positive_mass = common_values.sum(axis=0) > 0
+    if not positive_mass.all():
+        empty_types = [
+            str(cell_type)
+            for cell_type, valid in zip(sig.columns, positive_mass, strict=True)
+            if not valid
+        ]
+        raise InputValidationError(
+            "signature cell type(s) have no positive expression on common genes: "
+            + ", ".join(empty_types)
+        )
+
+    try:
+        rank = int(np.linalg.matrix_rank(common_values))
+    except np.linalg.LinAlgError as exc:  # pragma: no cover - LAPACK boundary
+        raise InputValidationError(
+            "could not determine the rank of the common-gene signature matrix"
+        ) from exc
+    if rank < n_types:
+        raise InputValidationError(
+            "common-gene signature matrix is rank deficient "
+            f"(rank={rank}, cell_types={n_types}); cell-type proportions are "
+            "not identifiable"
+        )
+
+    overlap = {
+        "common_gene_count": n_common,
+        "signature_gene_count": int(sig.shape[0]),
+        "bulk_gene_count": int(mix.shape[0]),
+        "signature_overlap_fraction": n_common / int(sig.shape[0]),
+        "bulk_overlap_fraction": n_common / int(mix.shape[0]),
+        "common_signature_rank": rank,
+        "cell_type_count": n_types,
+    }
+    return sig, mix, overlap
 
 
 def _finish_output(
@@ -247,6 +300,7 @@ def _finish_output(
     samples: Sequence[str],
     cell_types: Sequence[str],
     method: str,
+    auxiliary_types: Sequence[str] = (),
 ) -> pd.DataFrame:
     if not isinstance(value, pd.DataFrame):
         try:
@@ -261,6 +315,15 @@ def _finish_output(
     frame.columns = pd.Index([str(item) for item in frame.columns])
     expected_samples = [str(item) for item in samples]
     expected_types = [str(item) for item in cell_types]
+    auxiliary = [str(item) for item in auxiliary_types]
+    if (
+        set(expected_types).intersection(auxiliary)
+        or len(set(auxiliary)) != len(auxiliary)
+    ):
+        raise InputValidationError(
+            f"{method} auxiliary cell-type labels overlap or contain duplicates"
+        )
+    expected_columns = expected_types + auxiliary
 
     if frame.index.has_duplicates or frame.columns.has_duplicates:
         raise BackendExecutionError(f"{method} returned duplicate labels")
@@ -271,15 +334,15 @@ def _finish_output(
             f"{method} sample labels do not match the bulk matrix "
             f"(missing={missing}, extra={extra})"
         )
-    if set(frame.columns) != set(expected_types):
-        missing = sorted(set(expected_types).difference(frame.columns))
-        extra = sorted(set(frame.columns).difference(expected_types))
+    if set(frame.columns) != set(expected_columns):
+        missing = sorted(set(expected_columns).difference(frame.columns))
+        extra = sorted(set(frame.columns).difference(expected_columns))
         raise BackendExecutionError(
-            f"{method} cell-type labels do not match the signature matrix "
+            f"{method} output columns do not match the expected cell types "
             f"(missing={missing}, extra={extra})"
         )
 
-    frame = frame.reindex(index=expected_samples, columns=expected_types)
+    frame = frame.reindex(index=expected_samples, columns=expected_columns)
     try:
         frame = frame.astype(np.float64)
     except (TypeError, ValueError) as exc:
@@ -367,7 +430,7 @@ def run_cibersort_pair(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run relative and ``sig.score`` absolute CIBERSORT from one fit batch."""
 
-    sig, mix = _prepare_inputs(signature, bulk)
+    sig, mix, overlap = _prepare_inputs(signature, bulk)
     if threads < 1:
         raise InputValidationError("threads must be at least 1")
     engine = str(engine).strip().lower()
@@ -387,8 +450,14 @@ def run_cibersort_pair(
         )
         relative_raw = _cibersort_table(outputs["relative"], method="cibersort")
         absolute_raw = _cibersort_table(outputs["sig.score"], method="cibersort_abs")
-        relative_details = relative_raw.attrs.get("decepticonx_diagnostics")
-        absolute_details = absolute_raw.attrs.get("decepticonx_diagnostics")
+        relative_details = dict(
+            relative_raw.attrs.get("decepticonx_diagnostics") or {}
+        )
+        absolute_details = dict(
+            absolute_raw.attrs.get("decepticonx_diagnostics") or {}
+        )
+        relative_details["input_overlap"] = dict(overlap)
+        absolute_details["input_overlap"] = dict(overlap)
         relative = _finish_output(
             relative_raw,
             samples=mix.columns,
@@ -403,10 +472,8 @@ def run_cibersort_pair(
         )
         relative.attrs["decepticonx_engine"] = engine
         absolute.attrs["decepticonx_engine"] = engine
-        if relative_details:
-            relative.attrs["decepticonx_diagnostics"] = relative_details
-        if absolute_details:
-            absolute.attrs["decepticonx_diagnostics"] = absolute_details
+        relative.attrs["decepticonx_diagnostics"] = relative_details
+        absolute.attrs["decepticonx_diagnostics"] = absolute_details
         return relative, absolute
     except Exception as exc:
         error = _backend_failure("cibersort", exc)
@@ -459,7 +526,12 @@ def run_epic(
 ) -> pd.DataFrame:
     """Run EPIC with an in-memory custom reference and explicit mRNA values."""
 
-    sig, mix = _prepare_inputs(signature, bulk)
+    sig, mix, overlap = _prepare_inputs(signature, bulk)
+    if "otherCells" in sig.columns:
+        raise InputValidationError(
+            "EPIC reserves 'otherCells' for its unmodelled compartment; rename "
+            "that signature cell type before running EPIC"
+        )
     mrna_values = _validated_mrna_mapping(mrna_cell, sig.columns)
     if threads < 1:
         raise InputValidationError("threads must be at least 1")
@@ -479,21 +551,22 @@ def run_epic(
             reference=reference,
             mRNA_cell=mrna_values,
             # The original DECEPTICON custom path uses EPIC's default
-            # withOtherCells=TRUE. Keep that fit semantics, then expose only
-            # the requested signature columns through the common contract.
+            # withOtherCells=TRUE.  Preserve that compartment through the
+            # common estimate contract so downstream normalisation cannot turn
+            # absolute tissue fractions into fractions conditional on only the
+            # modelled cell types.
             withOtherCells=True,
             solver=solver_name,
             backend=backend_name,
             n_threads=int(threads),
         )
         estimate = _result_frame(result, attribute="cellFractions", key="cellFractions")
-        if isinstance(estimate, pd.DataFrame):
-            estimate = estimate.reindex(columns=list(sig.columns))
         finished = _finish_output(
             estimate,
             samples=mix.columns,
             cell_types=sig.columns,
             method="epic",
+            auxiliary_types=("otherCells",),
         )
         native = _native_available("epic", backend)
         # epic_py only dispatches the vectorized Nelder-Mead paths (``auto``
@@ -541,6 +614,8 @@ def run_epic(
             "native_available": native,
             "native_eligible": native_eligible,
             "backend_resolution_reason": resolution_reason,
+            "input_overlap": dict(overlap),
+            "auxiliary_cell_types": ["otherCells"],
         }
         fit_gof = getattr(result, "fit_gof", None)
         if isinstance(fit_gof, pd.DataFrame):
@@ -559,7 +634,7 @@ def run_deconrnaseq(
 ) -> pd.DataFrame:
     """Run DeconRNASeq's scaled, non-plotting custom-signature path."""
 
-    sig, mix = _prepare_inputs(signature, bulk)
+    sig, mix, overlap = _prepare_inputs(signature, bulk)
 
     def operation() -> pd.DataFrame:
         backend = _load_backend("deconrnaseq")
@@ -586,6 +661,7 @@ def run_deconrnaseq(
         finished.attrs["decepticonx_diagnostics"] = {
             "backend_requested": backend_name,
             "native_available": native,
+            "input_overlap": dict(overlap),
         }
         return finished
 
@@ -629,7 +705,7 @@ def run_music(
 ) -> pd.DataFrame:
     """Run MuSiC using DECEPTICON's five-donor custom-signature construction."""
 
-    sig, mix = _prepare_inputs(signature, bulk)
+    sig, mix, overlap = _prepare_inputs(signature, bulk)
 
     def operation() -> pd.DataFrame:
         backend = _load_backend("music")
@@ -673,6 +749,7 @@ def run_music(
         finished.attrs["decepticonx_diagnostics"] = {
             "backend_requested": backend_name,
             "native_available": native,
+            "input_overlap": dict(overlap),
         }
         return finished
 

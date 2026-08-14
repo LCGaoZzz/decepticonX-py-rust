@@ -33,6 +33,13 @@ ORIGINAL_PREFIXES = {
     "deconrnaseq": "Decon_sig_",
     "music": "music_sig_",
 }
+R_FILENAME_METHOD_ORDER = (
+    "deconrnaseq",
+    "epic",
+    "cibersort_abs",
+    "cibersort",
+    "music",
+)
 
 
 def arguments() -> argparse.Namespace:
@@ -140,6 +147,30 @@ def align_samples(frame: pd.DataFrame, samples: pd.Index) -> pd.DataFrame:
         }
     )
     return renamed.reindex(samples)
+
+
+def align_estimate(
+    frame: pd.DataFrame,
+    target_types: list[str],
+    samples: pd.Index,
+    *,
+    method: str,
+) -> pd.DataFrame:
+    """Align modeled targets and preserve EPIC's compositional auxiliary."""
+
+    targets = align_samples(align_columns(frame, target_types), samples)
+    if method != "epic":
+        return targets
+    matches = [column for column in frame.columns if token(column) == "othercells"]
+    if len(matches) != 1:
+        raise ValueError(
+            "EPIC estimate must contain exactly one otherCells column for "
+            "all-native-column consensus aggregation"
+        )
+    auxiliary = align_samples(frame[[matches[0]]], samples).rename(
+        columns={matches[0]: "otherCells"}
+    )
+    return pd.concat([targets, auxiliary], axis=1)
 
 
 def load_r_manifest(path: Path) -> dict[str, str]:
@@ -295,7 +326,9 @@ def original_estimates(
     for method, prefix in ORIGINAL_PREFIXES.items():
         for index, reference in enumerate(REFERENCE_ORDER, start=1):
             path = original / "res" / f"{prefix}{index}.txt"
-            frame = align_samples(align_columns(load_table(path), target_types), samples)
+            frame = align_estimate(
+                load_table(path), target_types, samples, method=method
+            )
             estimates[BranchKey(method=method, reference=reference)] = frame
     if len(estimates) != 15:
         raise AssertionError("expected exactly 15 original branches")
@@ -310,19 +343,53 @@ def accelerated_estimates(
         for reference in REFERENCE_ORDER:
             key = BranchKey(method=method, reference=reference)
             path = root / "estimates" / f"{key.slug}.tsv"
-            frame = align_samples(align_columns(load_table(path), target_types), samples)
+            frame = align_estimate(
+                load_table(path), target_types, samples, method=method
+            )
             estimates[key] = frame
     if len(estimates) != 15:
         raise AssertionError("expected exactly 15 accelerated branches")
     return estimates
 
 
+def consensus_strategy_order(
+    estimates: Mapping[BranchKey, pd.DataFrame],
+) -> tuple[BranchKey, ...]:
+    """Use the same C-locale filename order as the production pipeline."""
+
+    ordered = tuple(
+        BranchKey(method, reference)
+        for method in R_FILENAME_METHOD_ORDER
+        for reference in REFERENCE_ORDER
+    )
+    if set(ordered) != set(estimates):
+        raise ValueError("estimate branches do not match the 15-branch consensus grid")
+    return ordered
+
+
+def benchmark_consensus(
+    estimates: Mapping[BranchKey, pd.DataFrame], target_types: list[str]
+) -> ConsensusResult:
+    return build_consensus(
+        estimates,
+        cell_types=target_types,
+        n_pairs=2,
+        mode="r_literal",
+        strategy_order=consensus_strategy_order(estimates),
+    )
+
+
 def write_consensus(
     estimates: Mapping[BranchKey, pd.DataFrame], target_types: list[str], root: Path
 ) -> ConsensusResult:
-    result = build_consensus(estimates, cell_types=target_types, n_pairs=2)
-    result.normalized.to_csv(root / "original_common_consensus.tsv", sep="\t")
-    result.raw.to_csv(root / "original_common_consensus_raw.tsv", sep="\t")
+    result = benchmark_consensus(estimates, target_types)
+    result.primary.to_csv(root / "original_common_consensus.tsv", sep="\t")
+    result.unclosed.to_csv(
+        root / "original_common_consensus_unclosed.tsv", sep="\t"
+    )
+    result.closed.to_csv(
+        root / "original_common_consensus_closed.tsv", sep="\t"
+    )
     (root / "original_common_consensus_diagnostics.json").write_text(
         json.dumps(result.diagnostics, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -335,18 +402,48 @@ def checked_stored_consensus(
     target_types: list[str],
     samples: pd.Index,
 ) -> tuple[ConsensusResult, list[dict[str, object]]]:
-    recomputed = build_consensus(estimates, cell_types=target_types, n_pairs=2)
-    stored = {
-        "normalized": align_samples(
-            align_columns(load_table(root / "consensus.tsv"), target_types), samples
-        ),
-        "raw": align_samples(
-            align_columns(load_table(root / "consensus_raw.tsv"), target_types), samples
-        ),
+    recomputed = benchmark_consensus(estimates, target_types)
+    explicit_paths = {
+        "primary": root / "consensus.tsv",
+        "unclosed": root / "consensus_unclosed.tsv",
+        "closed": root / "consensus_closed.tsv",
     }
-    expected = {"normalized": recomputed.normalized, "raw": recomputed.raw}
+    if all(path.is_file() for path in explicit_paths.values()):
+        stored = {
+            scale: align_samples(
+                align_columns(load_table(path), target_types), samples
+            )
+            for scale, path in explicit_paths.items()
+        }
+        expected = {
+            "primary": recomputed.primary,
+            "unclosed": recomputed.unclosed,
+            "closed": recomputed.closed,
+        }
+    else:
+        # Compatibility with the benchmark artifact layout produced before the
+        # explicit unclosed/closed names were introduced.
+        legacy_raw = root / "consensus_raw.tsv"
+        if not legacy_raw.is_file():
+            raise FileNotFoundError(
+                "stored consensus is missing consensus_unclosed.tsv and "
+                "consensus_closed.tsv"
+            )
+        stored = {
+            "closed": align_samples(
+                align_columns(load_table(root / "consensus.tsv"), target_types),
+                samples,
+            ),
+            "unclosed": align_samples(
+                align_columns(load_table(legacy_raw), target_types), samples
+            ),
+        }
+        expected = {
+            "closed": recomputed.closed,
+            "unclosed": recomputed.unclosed,
+        }
     rows: list[dict[str, object]] = []
-    for scale in ("normalized", "raw"):
+    for scale in expected:
         metrics = matrix_metrics(expected[scale], stored[scale])
         rows.append({"scale": scale, **metrics})
         if not np.allclose(
@@ -586,7 +683,7 @@ def main() -> int:
         args.output / "stored_consensus_validation.tsv", sep="\t", index=False
     )
     consensus_rows = []
-    for scale in ("normalized", "raw"):
+    for scale in ("closed", "unclosed"):
         metrics = matrix_metrics(
             getattr(original_consensus, scale), getattr(solver_consensus, scale)
         )
@@ -608,7 +705,7 @@ def main() -> int:
             index=False,
         )
         e2e_consensus_rows = []
-        for scale in ("normalized", "raw"):
+        for scale in ("closed", "unclosed"):
             metrics = matrix_metrics(
                 getattr(original_consensus, scale), getattr(e2e_consensus, scale)
             )
@@ -617,11 +714,11 @@ def main() -> int:
             args.output / "e2e_consensus_metrics.tsv", sep="\t", index=False
         )
     predictions = {
-        "r_original_common5": original_consensus.normalized,
-        f"accelerated_on_r_refs_{args.expected_epic_solver}": solver_consensus.normalized,
+        "r_original_common5": original_consensus.closed,
+        f"accelerated_on_r_refs_{args.expected_epic_solver}": solver_consensus.closed,
     }
     if e2e_consensus is not None:
-        predictions["accelerated_corrected_e2e"] = e2e_consensus.normalized
+        predictions["accelerated_corrected_e2e"] = e2e_consensus.closed
 
     truth = truth_frame(args.truth)
     label_map = json.loads(args.label_map.read_text(encoding="utf-8"))

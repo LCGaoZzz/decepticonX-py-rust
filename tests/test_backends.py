@@ -15,7 +15,11 @@ from decepticonx.backends import (
     run_epic,
     run_music,
 )
-from decepticonx.exceptions import BackendExecutionError, BackendUnavailableError
+from decepticonx.exceptions import (
+    BackendExecutionError,
+    BackendUnavailableError,
+    InputValidationError,
+)
 from decepticonx.models import BranchKey
 
 
@@ -39,6 +43,14 @@ def test_cibersort_modes_share_one_fit_and_strip_diagnostics(
     matrices: tuple[pd.DataFrame, pd.DataFrame],
 ) -> None:
     signature, bulk = matrices
+    bulk_with_extra = pd.concat(
+        [
+            bulk,
+            pd.DataFrame(
+                [[1000.0, 1.0]], index=["bulk_only"], columns=bulk.columns
+            ),
+        ]
+    )
     calls: list[tuple[pd.DataFrame, pd.DataFrame, dict[str, object]]] = []
 
     def cibersort_all(sig, mix, **kwargs):
@@ -80,9 +92,9 @@ def test_cibersort_modes_share_one_fit_and_strip_diagnostics(
 
     estimates, diagnostics = run_backends(
         {"bayesprism": signature},
-        bulk,
+        bulk_with_extra,
         methods=("CIBERSORT", "CIBERSORT-ABS"),
-        qn=False,
+        qn=True,
         seed=17,
         threads=3,
     )
@@ -90,19 +102,21 @@ def test_cibersort_modes_share_one_fit_and_strip_diagnostics(
     assert len(calls) == 1
     passed_signature, passed_bulk, kwargs = calls[0]
     pd.testing.assert_frame_equal(passed_signature, signature)
-    pd.testing.assert_frame_equal(passed_bulk, bulk)
+    # CIBERSORT quantile-normalises the full mixture before intersecting
+    # genes, so the adapter must preserve bulk-only rows at this boundary.
+    pd.testing.assert_frame_equal(passed_bulk, bulk_with_extra)
     assert kwargs == {
         "perm": 0,
-        "QN": False,
+        "QN": True,
         "seed": 17,
         "threads": 3,
         "engine": "rust",
     }
     relative = estimates[BranchKey("cibersort", "bayesprism")]
     absolute = estimates[BranchKey("cibersort_abs", "bayesprism")]
-    assert list(relative.index) == list(bulk.columns)
+    assert list(relative.index) == list(bulk_with_extra.columns)
     assert list(relative.columns) == list(signature.columns)
-    assert list(absolute.index) == list(bulk.columns)
+    assert list(absolute.index) == list(bulk_with_extra.columns)
     assert list(absolute.columns) == list(signature.columns)
     np.testing.assert_allclose(relative.loc["sample_a"], [0.7, 0.3])
     np.testing.assert_allclose(absolute.loc["sample_a"], [1.4, 0.6])
@@ -198,8 +212,8 @@ def test_epic_uses_only_in_memory_custom_reference_and_explicit_mapping(
     assert epic_kwargs["backend"] == "rust"
     assert epic_kwargs["n_threads"] == 4
     assert list(estimate.index) == ["sample_a", "sample_b"]
-    assert list(estimate.columns) == ["B", "T"]
-    np.testing.assert_allclose(estimate.loc["sample_a"], [0.7, 0.2])
+    assert list(estimate.columns) == ["B", "T", "otherCells"]
+    np.testing.assert_allclose(estimate.loc["sample_a"], [0.7, 0.2, 0.1])
     details = estimate.attrs["decepticonx_diagnostics"]
     fit_payload = details["fit_gof"]
     assert estimate.attrs["decepticonx_engine"] == "python"
@@ -256,9 +270,9 @@ def test_epic_diagnostics_describe_the_possible_execution_path(
             EpicReference=lambda **kwargs: kwargs,
             EPIC=lambda **kwargs: SimpleNamespace(
                 cellFractions=pd.DataFrame(
-                    [[0.7, 0.2], [0.2, 0.7]],
+                    [[0.7, 0.2, 0.1], [0.2, 0.7, 0.1]],
                     index=["sample_b", "sample_a"],
-                    columns=["T", "B"],
+                    columns=["T", "B", "otherCells"],
                 )
             ),
         ),
@@ -300,9 +314,9 @@ def test_epic_diagnostics_preserve_request_when_environment_overrides_backend(
             EpicReference=lambda **kwargs: kwargs,
             EPIC=lambda **kwargs: SimpleNamespace(
                 cellFractions=pd.DataFrame(
-                    [[0.7, 0.2], [0.2, 0.7]],
+                    [[0.7, 0.2, 0.1], [0.2, 0.7, 0.1]],
                     index=["sample_b", "sample_a"],
-                    columns=["T", "B"],
+                    columns=["T", "B", "otherCells"],
                 )
             ),
         ),
@@ -369,9 +383,9 @@ def test_run_backends_records_epic_resolved_engine(
             EpicReference=lambda **kwargs: kwargs,
             EPIC=lambda **kwargs: SimpleNamespace(
                 cellFractions=pd.DataFrame(
-                    [[0.7, 0.2], [0.2, 0.7]],
+                    [[0.7, 0.2, 0.1], [0.2, 0.7, 0.1]],
                     index=["sample_b", "sample_a"],
-                    columns=["T", "B"],
+                    columns=["T", "B", "otherCells"],
                 )
             ),
         ),
@@ -511,6 +525,33 @@ def test_outputs_must_be_finite_and_nonnegative(
         run_deconrnaseq(signature, bulk)
 
 
+def test_backend_rejects_a_rank_deficient_common_signature(
+    matrices: tuple[pd.DataFrame, pd.DataFrame],
+) -> None:
+    signature, bulk = matrices
+    signature["T"] = signature["B"] * 2.0
+    with pytest.raises(InputValidationError, match="rank deficient"):
+        run_deconrnaseq(signature, bulk)
+
+
+def test_backend_rejects_a_target_with_no_mass_on_common_genes(
+    matrices: tuple[pd.DataFrame, pd.DataFrame],
+) -> None:
+    signature, bulk = matrices
+    signature["T"] = 0.0
+    with pytest.raises(InputValidationError, match="no positive expression"):
+        run_deconrnaseq(signature, bulk)
+
+
+def test_backend_rejects_too_few_common_genes_for_requested_types(
+    matrices: tuple[pd.DataFrame, pd.DataFrame],
+) -> None:
+    signature, bulk = matrices
+    one_common_gene = bulk.rename(index={"g2": "x2", "g3": "x3"})
+    with pytest.raises(InputValidationError, match="too few genes in common"):
+        run_deconrnaseq(signature, one_common_gene)
+
+
 def test_non_strict_mode_records_epic_authorization_gate(
     matrices: tuple[pd.DataFrame, pd.DataFrame],
 ) -> None:
@@ -561,9 +602,17 @@ def test_backend_warnings_are_retained_in_diagnostics(
         "RuntimeWarning: solver reached its iteration limit"
     ]
     assert diagnostics["engines"]["deconrnaseq__music2"] == "numpy"
-    assert diagnostics["branch_details"]["deconrnaseq__music2"] == {
-        "backend_requested": "auto",
-        "native_available": False,
+    details = diagnostics["branch_details"]["deconrnaseq__music2"]
+    assert details["backend_requested"] == "auto"
+    assert details["native_available"] is False
+    assert details["input_overlap"] == {
+        "signature_gene_count": 3,
+        "bulk_gene_count": 3,
+        "common_gene_count": 3,
+        "signature_overlap_fraction": 1.0,
+        "bulk_overlap_fraction": 1.0,
+        "common_signature_rank": 2,
+        "cell_type_count": 2,
     }
 
 

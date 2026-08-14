@@ -119,6 +119,8 @@ accelerated E2E configuration for this compatibility dataset is:
     "cibersort", "cibersort_abs", "epic", "deconrnaseq", "music"
   ],
   "references": ["bayesprism", "monocle3", "music2"],
+  "consensus_mode": "r_literal",
+  "consensus_pairs": 2,
   "epic_mrna_cell": {"default": 1.0},
   "cibersort_seed": 20260814,
   "threads": 8,
@@ -141,11 +143,19 @@ accelerated E2E configuration for this compatibility dataset is:
 Change only `threads` (for example, 1 and 8) when measuring scaling. Keep the
 seed, data, mappings, engine selections, and an empty output directory fixed.
 
+Both accelerated tracks use the production `r_literal` selector/positional
+weighting kernel with the deterministic C-locale R filename-equivalent branch
+order. Branch aggregation uses the documented all-native-column composition
+space, including EPIC `otherCells` in its branch denominator; the broken
+original 15-strategy `decostand` block is not claimed as a
+reproducible R output. Accuracy metrics use the explicitly closed consensus
+view, while the mode-primary and unclosed views remain stored separately.
+
 `compare_results.py` refuses a frozen comparison unless the R manifest and
 frozen `run.json` agree on bulk SHA-256 and seed, all three recorded reference
 hashes equal the actual R files, and EPIC requested the solver named by
 `--expected-epic-solver` (`nm` by default). It also rebuilds the frozen
-consensus from the 15 branches and checks both stored consensus files before
+consensus from the 15 branches and checks the primary, unclosed, and closed files before
 reporting direct original-versus-frozen consensus metrics.
 
 Use external `/usr/bin/time -v` around both commands for wall time and peak
