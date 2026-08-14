@@ -8,7 +8,7 @@ The workflow can interoperate at runtime with independently obtained software:
 
 | Backend | Upstream used by this project | License/status observed at the pinned revision |
 |---|---|---|
-| Reference builders | [LCGaoZzz/decepticon-fast](https://github.com/LCGaoZzz/decepticon-fast) `512c9c9d47b3e3a735f17e882aff07460560cb4c` | Code declares MIT; bundled BayesPrism-derived annotation tables are identified by its NOTICE as GPL-2 or GPL-3 |
+| Reference builders | [LCGaoZzz/decepticon-fast](https://github.com/LCGaoZzz/decepticon-fast) `a98b66c7da5fad81ba6a1eaddb9c826daac31fad` | Code declares MIT; bundled BayesPrism-derived annotation tables are identified by its NOTICE as GPL-2 or GPL-3 |
 | CIBERSORT / CIBERSORT-ABS | [LCGaoZzz/python-cibersort-rs](https://github.com/LCGaoZzz/python-cibersort-rs) `v0.1.1` / `cd957af06357d2636ba18af1135bf70b488dfbbb` | GPL-3.0-or-later |
 | EPIC | `LCGaoZzz/epic-py-rust` `2e661cccb5c9d7c8327bd65253e3495a1d3c1991` | Private repository; LICR academic/non-commercial terms; no redistribution without permission |
 | DeconRNASeq | [LCGaoZzz/deconrnaseq-py](https://github.com/LCGaoZzz/deconrnaseq-py) `a2ec1b9ebe341628e945a6d25c6068cad975f6b5` | GPL-2.0-only as declared by that repository |

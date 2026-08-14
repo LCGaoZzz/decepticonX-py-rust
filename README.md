@@ -38,7 +38,9 @@ fast port (one scalar library-size multiplier and incorrect gene order) and
 does not execute the defective path merely for comparison. It constructs each
 cell-type column as mean expression on raw counts, keeps genes in bulk order,
 enforces the original 20% bulk/single-cell overlap gate, and rejects
-non-identifiable common-gene designs.
+non-identifiable common-gene designs. The `music2` name refers only to this
+corrected signature construction; it does not implement MuSiC2's complete
+condition-aware, iterative removal of cell-type-specific DE genes.
 
 ## Requirements
 
@@ -81,7 +83,7 @@ available:
 
 ```bash
 python -m pip install \
-  "git+https://github.com/LCGaoZzz/decepticon-fast.git@512c9c9d47b3e3a735f17e882aff07460560cb4c"
+  "git+https://github.com/LCGaoZzz/decepticon-fast.git@a98b66c7da5fad81ba6a1eaddb9c826daac31fad"
 python -m pip install \
   "git+https://github.com/LCGaoZzz/python-cibersort-rs.git@cd957af06357d2636ba18af1135bf70b488dfbbb"
 ```
@@ -447,6 +449,14 @@ workflow inside the existing environment.
   it as a commit-bound historical baseline, not as numerical validation of the
   two modes documented above. The harness itself now emits and verifies the
   final primary/unclosed/closed contract.
+- A commit-bound external validation on the official MuSiC2 pancreatic-islet
+  data completed all 12 non-EPIC branches on 100 samples without skips or
+  invalid outputs. The best branch had pooled RMSE `0.054668`, versus
+  `0.094504` for the closed consensus, so this run validates the pipeline
+  contract but does not support a claim that consensus improves accuracy.
+  The matched healthy `MuSiC x MuSiC2-style` branch had RMSE `0.001890`,
+  supporting the corrected template construction. See the
+  [frozen report](benchmarks/music2_validation/report/2026-08-15/README.md).
 - CI builds both sdist and wheel, installs the wheel, runs `pip check`, checks
   the CLI and byte-compilation, then runs the core test suite on Python 3.11
   and 3.12. Optional licensed/native integrations remain separate from public

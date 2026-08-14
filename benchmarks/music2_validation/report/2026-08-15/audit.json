@@ -1,0 +1,76 @@
+{
+  "main_commit": "86ddffaf95da323ded426ce3bc54e5cff7ab6fde",
+  "branch_count": 12,
+  "completed_branches": [
+    "cibersort__bayesprism",
+    "cibersort_abs__bayesprism",
+    "deconrnaseq__bayesprism",
+    "music__bayesprism",
+    "cibersort__monocle3",
+    "cibersort_abs__monocle3",
+    "deconrnaseq__monocle3",
+    "music__monocle3",
+    "cibersort__music2",
+    "cibersort_abs__music2",
+    "deconrnaseq__music2",
+    "music__music2"
+  ],
+  "skipped_branches": {},
+  "engines": {
+    "cibersort__bayesprism": "rust",
+    "cibersort_abs__bayesprism": "rust",
+    "deconrnaseq__bayesprism": "numpy",
+    "music__bayesprism": "numpy",
+    "cibersort__monocle3": "rust",
+    "cibersort_abs__monocle3": "rust",
+    "deconrnaseq__monocle3": "numpy",
+    "music__monocle3": "numpy",
+    "cibersort__music2": "rust",
+    "cibersort_abs__music2": "rust",
+    "deconrnaseq__music2": "numpy",
+    "music__music2": "numpy"
+  },
+  "timings_seconds": {
+    "bulk_input": 0.6073430000105873,
+    "single_cell_input": 0.3400532999949064,
+    "references": 0.16563279999536462,
+    "backends": 2242.237078799997,
+    "consensus": 0.009323799997218885,
+    "total": 2243.3594957999885
+  },
+  "saved_primary_equals_unclosed_max_abs": 0.0,
+  "r_literal_recompute_unclosed_max_abs": 2.220446049250313e-16,
+  "r_literal_recompute_closed_max_abs": 2.7755575615628914e-16,
+  "r_literal_closed_max_row_sum_error": 5.551115123125783e-16,
+  "corrected_primary_equals_closed_max_abs": 0.0,
+  "corrected_closed_max_row_sum_error": 2.220446049250313e-16,
+  "corrected_fallbacks": {},
+  "reference_rounding_sensitivity": {
+    "bayesprism": {
+      "max_abs": 3.6987760140124386e-07,
+      "mean_abs": 4.087427742447397e-10,
+      "relative_frobenius": 1.4366131309464593e-05,
+      "pearson": 0.9999999998903238
+    },
+    "monocle3": {
+      "max_abs": 0.27731723403422937,
+      "mean_abs": 0.00021718227972261376,
+      "relative_frobenius": 1.2039530149102525e-05,
+      "pearson": 0.9999999999274327
+    },
+    "music2": {
+      "max_abs": 0.09375000000000001,
+      "mean_abs": 5.474657134763794e-05,
+      "relative_frobenius": 2.582365643313031e-06,
+      "pearson": 0.9999999999966599
+    }
+  },
+  "source_hashes_sha256": {
+    "music2_bulk_eset.rds": "d91cd5cf05d599ce9a71881695ea96377b73c31696e1428f905dbe564c535bf7",
+    "music2_EMTABsce_healthy.rds": "83e28865bb11e322d198fb10a3486f3644f17a2c09ad16f327d88a43ed11e94e",
+    "music2_true_proportion.RData": "9de30664ea3e51d8fd2a87dc14c8d5d9a23fb25c83ce9141562f454da744346c",
+    "reference.h5ad": "b77e3e5ca1f5a673ad45e2bec83aaa25e4f51655c3e46300155add74a5282883",
+    "bulk.tsv": "febdd083572100d51bbc5e8e1aa5d3b9901cb3c79decae2d140e23cf39649388",
+    "truth.tsv": "0db967bdd2f7d141656dc3002a59810fe0c18bd21e01ab2dab332daf0ac44ab5"
+  }
+}
