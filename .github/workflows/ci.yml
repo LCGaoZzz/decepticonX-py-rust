@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install ".[test]"
+      - run: python -m build
+      - run: python -m pip install --force-reinstall dist/*.whl
+      - run: python -m pip check
+      - run: python -m decepticonx --help
+      - run: python -m compileall -q src tests
+      - run: python -m pytest
+
+  public-backend-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install ".[test]" "pandas>=2.0" "libsvm-official==3.37.0"
+      - name: Check out locked public backends
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/decepticonx-backends"
+          mkdir -p "$root"
+          checkout_locked() {
+            local component="$1"
+            local destination="$2"
+            local repository commit
+            repository="$(jq -r ".components.${component}.repository" backend-lock.json)"
+            commit="$(jq -r ".components.${component}.commit" backend-lock.json)"
+            git init -q "$root/$destination"
+            git -C "$root/$destination" remote add origin "$repository"
+            git -C "$root/$destination" fetch -q --depth=1 origin "$commit"
+            git -C "$root/$destination" checkout -q --detach FETCH_HEAD
+            test "$(git -C "$root/$destination" rev-parse HEAD)" = "$commit"
+          }
+          checkout_locked cibersort python-cibersort-rs
+          checkout_locked deconrnaseq deconrnaseq-py
+          checkout_locked music music-py
+      - name: Smoke-test real public backends
+        shell: bash
+        env:
+          DECEPTICONX_RUN_BACKEND_INTEGRATION: "1"
+        run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE/src:$RUNNER_TEMP/decepticonx-backends/python-cibersort-rs/src:$RUNNER_TEMP/decepticonx-backends/deconrnaseq-py/src:$RUNNER_TEMP/decepticonx-backends/music-py/src"
+          python -c "import python_cibersort, deconrnaseq, music_py"
+          python -m pytest -q tests/test_integration_backends.py

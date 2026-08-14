@@ -1,0 +1,9 @@
+stage	original_r_seconds	accelerated_seconds	r_over_accelerated	qualification
+reference_build_including_single_cell_preprocessing	81.326000	3.045491	26.703742	full product tracks; accelerated includes SC loading, intersection/remainder preparation, and aggregation
+cibersort_pair_three_refs	62.218000	1.895127	32.830511	frozen R refs; R fits relative and ABS separately, accelerated shares each fit
+epic_three_refs_auto	8.992000	1.744568	5.154284	frozen R refs; accelerated Rust-enabled hybrid auto
+epic_three_refs_nm	8.992000	29.878673	0.300950	frozen R refs; accelerated Python nm optimizer-fidelity track
+deconrnaseq_three_refs	0.715000	0.075429	9.479151	frozen R refs; R includes fig=TRUE
+music_three_refs	2.204000	0.112122	19.657154	frozen R refs; includes R bulk ExpressionSet setup
+backend_common5_auto	74.129000	3.827246	19.368756	internal elapsed; writing boundaries differ
+backend_common5_nm	74.129000	32.081010	2.310682	internal elapsed; optimizer-fidelity track

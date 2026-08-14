@@ -1,0 +1,13 @@
+{
+  "Melanoma cells": "Melanoma cell",
+  "Ovarian carcinoma cells": "Ovarian carcinoma cell",
+  "B cells": "B cell",
+  "CD8+ T cells": "T cell CD8+",
+  "CD4+ T cells": "T cell CD4+ (non-regulatory)",
+  "Macrophages/Monocytes": "Macrophage/Monocyte",
+  "regulatory T cells": "T cell regulatory (Tregs)",
+  "Dendritic cells": "Plasmacytoid dendritic cell",
+  "Natural killer cells": "NK cell",
+  "Cancer associated fibroblasts": "Cancer associated fibroblast",
+  "Endothelial cells": "Endothelial cell"
+}

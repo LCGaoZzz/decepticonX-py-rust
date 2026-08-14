@@ -1,0 +1,6 @@
+scope	run	threads	epic_solver	epic_engine	wall_seconds	internal_seconds	max_rss_kb	speedup_vs_full_r
+full_e2e	original_r	stock_forked	r_constrOptim	r	166.31	159.028000	14252724	1.000000
+full_e2e	accelerated_h5ad	1	auto	hybrid	21.85	17.922067	302716	7.611442
+full_e2e	accelerated_h5ad	8	auto	hybrid	10.71	6.876859	353656	15.528478
+frozen_reference	accelerated_optimizer_fidelity	8	nm	python	36.20	32.301892	224492	NA
+frozen_reference	accelerated_product	8	auto	hybrid	7.65	4.045627	224088	NA
