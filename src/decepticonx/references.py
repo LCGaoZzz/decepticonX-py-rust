@@ -41,7 +41,7 @@ def _load_fast() -> Any:
             "Reference construction requires the optional 'decepticon-fast' "
             "package. Install the pinned source or a compatible wheel: "
             "python -m pip install \"git+https://github.com/LCGaoZzz/"
-            "decepticon-fast.git@512c9c9d47b3e3a735f17e882aff07460560cb4c\""
+            "decepticon-fast.git@a98b66c7da5fad81ba6a1eaddb9c826daac31fad\""
         ) from exc
 
 

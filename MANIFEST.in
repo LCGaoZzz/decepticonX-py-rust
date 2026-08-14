@@ -1,5 +1,7 @@
 include backend-lock.json
-recursive-include benchmarks *.py *.R *.md *.tsv
+recursive-include benchmarks *.py *.R *.md *.tsv *.json
+prune benchmarks/music2_validation/data
+prune benchmarks/music2_validation/work
 recursive-include docs *.md
 recursive-include examples *.json
 recursive-include scripts *.py *.R

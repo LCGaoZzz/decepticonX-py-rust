@@ -17,3 +17,5 @@ results/
 *.rda
 *.RData
 simulation_data_human/
+benchmarks/music2_validation/data/
+benchmarks/music2_validation/work/

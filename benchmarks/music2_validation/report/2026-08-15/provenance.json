@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "validation_date": "2026-08-15",
+  "package": {
+    "repository": "https://github.com/LCGaoZzz/decepticonX-py-rust",
+    "commit": "86ddffaf95da323ded426ce3bc54e5cff7ab6fde",
+    "version": "0.1.0"
+  },
+  "data": {
+    "repository": "https://github.com/xuranw/MuSiC",
+    "commit": "0f8e5aa71d6fe76d346c913a823b9f1e6d6bb800",
+    "bulk_samples": 100,
+    "healthy_samples": 50,
+    "t2d_samples": 50,
+    "selected_reference_cells": 995,
+    "healthy_reference_donors": 6,
+    "cell_types": 6,
+    "common_genes": 10000
+  },
+  "environment": {
+    "python": "3.11.3",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "threads": 8
+  },
+  "components": {
+    "reference_builders": "a98b66c7da5fad81ba6a1eaddb9c826daac31fad",
+    "cibersort": "cd957af06357d2636ba18af1135bf70b488dfbbb",
+    "deconrnaseq": "a2ec1b9ebe341628e945a6d25c6068cad975f6b5",
+    "music": "a4464c84f87fbeb61f0fa7032625bad21add52dd"
+  },
+  "scope": {
+    "references": ["bayesprism", "monocle3", "music2"],
+    "methods": ["cibersort", "cibersort_abs", "deconrnaseq", "music"],
+    "branch_count": 12,
+    "epic_omitted": true,
+    "epic_omission_reason": "No validated, authorized six-type mRNA-per-cell mapping was available.",
+    "primary_consensus": "r_literal",
+    "corrected_consensus_recomputed_from_same_estimates": true
+  }
+}
