@@ -158,6 +158,12 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
         help="EPIC backend; use rust to require its native kernel",
     )
     parser.add_argument(
+        "--epic-solver",
+        choices=("auto", "nm", "nmf", "qp"),
+        default=None,
+        help="EPIC optimizer (nm gives strict original-R optimizer parity)",
+    )
+    parser.add_argument(
         "--deconrnaseq-backend",
         choices=("auto", "rust", "numpy"),
         default=None,
@@ -291,6 +297,7 @@ def _config_from_arguments(args: argparse.Namespace, *, run: bool) -> PipelineCo
             "strict_backends",
             "cibersort_engine",
             "epic_backend",
+            "epic_solver",
             "deconrnaseq_backend",
             "music_backend",
         ):

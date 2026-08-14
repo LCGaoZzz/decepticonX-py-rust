@@ -102,6 +102,7 @@ def test_pipeline_connects_stages_records_metadata_and_writes(
         "cibersort_engine": "rust",
         "deconrnaseq_backend": "auto",
         "epic_backend": "auto",
+        "epic_solver": "auto",
         "music_backend": "auto",
     }
     assert calls["consensus"][1] == {"cell_types": ("B", "T"), "n_pairs": 1}
@@ -197,6 +198,27 @@ def test_configuration_rejects_ambiguous_json_types(field, value, match) -> None
         pipeline._configuration({field: value})
 
 
+def test_epic_solver_is_validated_and_canonicalized() -> None:
+    assert pipeline._configuration({"epic_solver": " NM "}).epic_solver == "nm"
+    with pytest.raises(InputValidationError, match="epic_solver must be one of"):
+        pipeline._configuration({"epic_solver": "not-a-solver"})
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        {"T": True},
+        {"T": "not-a-number"},
+        {"T": 0},
+        {"T": float("inf")},
+        {"": 1.0},
+    ],
+)
+def test_epic_mapping_is_validated_before_provenance_hashing(mapping) -> None:
+    with pytest.raises(InputValidationError, match="epic_mrna_cell"):
+        pipeline._configuration({"epic_mrna_cell": mapping})
+
+
 def test_epic_configuration_fails_before_any_input_work(monkeypatch) -> None:
     monkeypatch.setattr(
         pipeline,
@@ -214,10 +236,17 @@ def test_epic_configuration_fails_before_any_input_work(monkeypatch) -> None:
 
 
 def test_epic_mapping_and_inline_command_are_redacted() -> None:
-    config = PipelineConfig(epic_mrna_cell={"T": 2.5, "default": 1.0})
+    config = PipelineConfig(
+        epic_mrna_cell={"T": 2.5, "default": 1.0}, epic_solver="nm"
+    )
     recorded = pipeline._provenance_config(config)
     assert recorded["epic_mrna_cell"]["entry_count"] == 2
     assert recorded["epic_mrna_cell"]["values_redacted"] is True
+    assert recorded["epic_mrna_cell"]["hash_format"].startswith("sorted key")
+    assert recorded["epic_mrna_cell"]["sha256"] == (
+        "1360b12f568ec6a9777f7a4252ba9b92f35c589df81a919bf62ab334f91aae71"
+    )
+    assert recorded["epic_solver"] == "nm"
     assert "2.5" not in json.dumps(recorded)
     command = pipeline._redacted_command(
         ["decepticonx", "run", "--epic-mrna-cell", '{"T":2.5}']

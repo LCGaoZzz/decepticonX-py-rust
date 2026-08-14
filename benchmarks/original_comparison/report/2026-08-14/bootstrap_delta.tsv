@@ -1,0 +1,3 @@
+left	right	delta_pooled_rmse_right_minus_left	bootstrap_ci_low	bootstrap_ci_high
+r_original_common5	accelerated_on_r_refs_nm	-0.001263073153224159	-0.0016820193166136338	-0.0008936461671068008
+r_original_common5	accelerated_corrected_e2e	-0.0015133767663484676	-0.001983221261095605	-0.0010798109376230786

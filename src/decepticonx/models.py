@@ -48,6 +48,7 @@ class PipelineConfig:
     epic_mrna_cell: Mapping[str, float] | None = None
     cibersort_engine: str = "rust"
     epic_backend: str = "auto"
+    epic_solver: str = "auto"
     deconrnaseq_backend: str = "auto"
     music_backend: str = "auto"
 

@@ -47,6 +47,8 @@ def test_run_command_builds_config_and_forwards_output(monkeypatch, tmp_path, ca
             "--permissive",
             "--epic-mrna-json",
             '{"B": 1.2, "T": 2.3}',
+            "--epic-solver",
+            "nm",
         ]
     )
 
@@ -59,6 +61,7 @@ def test_run_command_builds_config_and_forwards_output(monkeypatch, tmp_path, ca
     assert config.cibersort_qn is False
     assert config.strict_backends is False
     assert config.epic_mrna_cell == {"B": 1.2, "T": 2.3}
+    assert config.epic_solver == "nm"
     assert captured["output_dir"] == str(output)
     report = json.loads(capsys.readouterr().out)
     assert report["ok"] is True

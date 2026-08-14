@@ -217,6 +217,7 @@ To run all five methods, create `config.json` with an authorized EPIC mapping:
   },
   "cibersort_engine": "rust",
   "epic_backend": "rust",
+  "epic_solver": "auto",
   "deconrnaseq_backend": "rust",
   "music_backend": "rust",
   "threads": 8
@@ -231,6 +232,26 @@ Every custom EPIC cell type plus `otherCells` needs a positive value, unless
 the mapping contains an explicit `"default"`. `{"default": 1.0}` is accepted
 as a deliberate unscaled approximation for a custom reference; it is **not**
 equivalent to EPIC's licensed defaults or to the original R cell fractions.
+
+`epic_solver` defaults to `"auto"`, preserving the accelerated package's
+existing behavior. Use `"nm"` (or CLI `--epic-solver nm`) to force the
+original R EPIC `constrOptim`/Nelder-Mead path for strict optimizer parity.
+`"nmf"` uses the vectorized Nelder-Mead objective, while `"qp"` selects the
+exact active-set solution and can differ from the optimizer result produced by
+R. The solver choice is recorded in both run provenance and EPIC branch
+diagnostics.
+
+EPIC's requested backend and its execution class are recorded separately. The
+`nm` and `qp` solvers always execute in Python, including when
+`epic_backend="rust"` was requested. `nmf` resolves to Rust only when the
+effective backend permits it and the native kernel is available. `auto` first
+probes every sample with Python QP and sends only unresolved samples to Rust;
+when native dispatch is available it is therefore recorded as `hybrid`, even
+if the unresolved subset happens to be empty. Otherwise it resolves to Python.
+Branch diagnostics retain
+`backend_requested` and add `backend_effective`, `backend_resolved`,
+`native_eligible`, and `backend_resolution_reason`. The branch-level `engines`
+entry contains `rust`, `python`, or `hybrid`.
 
 Use a new or empty output directory. The writer refuses a non-empty directory
 so files from an earlier branch set cannot be mistaken for current results.
@@ -348,9 +369,14 @@ workflow inside the existing environment.
   backends about 116.9 seconds. This is a smoke timing, not a controlled
   cross-implementation benchmark.
 - The mechanically cleaned 362-gene portion of the supplied human archive
-  completed all 15 branches (100 samples x 11 types), proving format and
-  orchestration compatibility only. Its input defects invalidate accuracy and
-  speed conclusions.
+  completed all 15 branches (100 samples x 11 types) in both the pinned
+  original-source selective harness and this package. The reproducible
+  [comparison report](benchmarks/original_comparison/report/2026-08-14/README.md)
+  records 166.31 seconds for R, 21.85 seconds for accelerated one-thread, and
+  10.71 seconds for accelerated eight-thread execution, along with reference,
+  branch, consensus, truth, and memory metrics. Its input defects limit those
+  numbers to an operational compatibility smoke test; they do not support a
+  general speed or scientific accuracy claim.
 - CI builds both sdist and wheel, installs the wheel, runs `pip check`, checks
   the CLI and byte-compilation, then runs the core test suite on Python 3.11
   and 3.12. Optional licensed/native integrations remain separate from public

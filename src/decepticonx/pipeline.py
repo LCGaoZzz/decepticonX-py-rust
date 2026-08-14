@@ -13,6 +13,7 @@ from dataclasses import fields
 from hashlib import sha256
 from importlib import metadata
 import json
+import math
 import platform
 from pathlib import Path
 import sys
@@ -72,7 +73,24 @@ def _configuration(config: PipelineConfig | Mapping[str, Any] | None) -> Pipelin
     if result.epic_mrna_cell is not None:
         if not isinstance(result.epic_mrna_cell, Mapping):
             raise InputValidationError("epic_mrna_cell must be a JSON object/mapping")
-        result.epic_mrna_cell = dict(result.epic_mrna_cell)
+        normalized_mapping: dict[str, float] = {}
+        for key, value in result.epic_mrna_cell.items():
+            if not isinstance(key, str) or not key or isinstance(value, bool):
+                raise InputValidationError(
+                    "epic_mrna_cell keys must be non-empty strings and values numeric"
+                )
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError) as exc:
+                raise InputValidationError(
+                    f"epic_mrna_cell value for {key!r} must be numeric"
+                ) from exc
+            if not math.isfinite(numeric) or numeric <= 0:
+                raise InputValidationError(
+                    f"epic_mrna_cell value for {key!r} must be finite and positive"
+                )
+            normalized_mapping[key] = numeric
+        result.epic_mrna_cell = normalized_mapping
 
     if not str(result.cell_type_key).strip():
         raise InputValidationError("cell_type_key cannot be empty")
@@ -104,6 +122,7 @@ def _configuration(config: PipelineConfig | Mapping[str, Any] | None) -> Pipelin
     engine_choices = {
         "cibersort_engine": {"rust", "libsvm", "numpy"},
         "epic_backend": {"auto", "rust", "python"},
+        "epic_solver": {"auto", "nm", "nmf", "qp"},
         "deconrnaseq_backend": {"auto", "rust", "numpy"},
         "music_backend": {"auto", "rust", "numpy"},
     }
@@ -253,11 +272,14 @@ def _provenance_config(config: PipelineConfig) -> dict[str, Any]:
     result = config_as_dict(config)
     mapping = result.get("epic_mrna_cell")
     if mapping is not None:
-        encoded = json.dumps(mapping, sort_keys=True, separators=(",", ":"), default=str)
+        encoded = "\n".join(
+            f"{key}\t{float(mapping[key]):.17g}" for key in sorted(mapping)
+        )
         result["epic_mrna_cell"] = {
             "provided": True,
             "entry_count": len(mapping),
             "sha256": sha256(encoded.encode("utf-8")).hexdigest(),
+            "hash_format": "sorted key, tab, %.17g value, newline-separated",
             "values_redacted": True,
         }
     return result
@@ -365,6 +387,7 @@ def run_decepticonx(
             cibersort_engine=cfg.cibersort_engine,
             deconrnaseq_backend=cfg.deconrnaseq_backend,
             epic_backend=cfg.epic_backend,
+            epic_solver=cfg.epic_solver,
             music_backend=cfg.music_backend,
         )
     )

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 import importlib
+import os
 from typing import Any
 import warnings
 
@@ -454,6 +455,7 @@ def run_epic(
     mrna_cell: Mapping[str, float] | None,
     threads: int = 1,
     backend_name: str = "auto",
+    solver: str = "auto",
 ) -> pd.DataFrame:
     """Run EPIC with an in-memory custom reference and explicit mRNA values."""
 
@@ -461,6 +463,9 @@ def run_epic(
     mrna_values = _validated_mrna_mapping(mrna_cell, sig.columns)
     if threads < 1:
         raise InputValidationError("threads must be at least 1")
+    solver_name = str(solver).strip().lower()
+    if solver_name not in {"auto", "nm", "nmf", "qp"}:
+        raise InputValidationError("EPIC solver must be auto, nm, nmf, or qp")
 
     def operation() -> pd.DataFrame:
         backend = _load_backend("epic")
@@ -477,6 +482,7 @@ def run_epic(
             # withOtherCells=TRUE. Keep that fit semantics, then expose only
             # the requested signature columns through the common contract.
             withOtherCells=True,
+            solver=solver_name,
             backend=backend_name,
             n_threads=int(threads),
         )
@@ -490,13 +496,51 @@ def run_epic(
             method="epic",
         )
         native = _native_available("epic", backend)
-        resolved = backend_name if backend_name != "auto" else (
-            "auto:rust-available" if native else "auto:python-only"
-        )
+        # epic_py only dispatches the vectorized Nelder-Mead paths (``auto``
+        # and ``nmf``) to its optional Rust kernel.  The R-faithful ``nm``
+        # and active-set ``qp`` solvers always execute in Python, even when
+        # backend="rust" was requested.  Mirror epic_py's EPIC_BACKEND
+        # override so provenance describes the execution class without
+        # claiming that ``auto`` necessarily invoked the native subset.
+        environment_backend = os.environ.get("EPIC_BACKEND")
+        effective_backend = (
+            environment_backend if environment_backend is not None else backend_name
+        ).lower()
+        native_eligible = solver_name in {"auto", "nmf"}
+        if not native_eligible:
+            resolved = "python"
+            resolution_reason = "solver_python_only"
+        elif effective_backend == "python":
+            resolved = "python"
+            resolution_reason = "python_backend_selected"
+        elif effective_backend not in {"auto", "rust"}:
+            # epic_py currently falls through to its Python implementation
+            # for an unsupported EPIC_BACKEND value.
+            resolved = "python"
+            resolution_reason = "unsupported_backend_python_fallback"
+        elif effective_backend in {"auto", "rust"} and native:
+            if solver_name == "auto":
+                # epic_py probes every sample with its Python QP solver and
+                # dispatches only the unresolved subset to Rust.  That subset
+                # may be empty, so calling this a pure Rust execution would be
+                # false provenance even though the native kernel is available.
+                resolved = "hybrid"
+                resolution_reason = "python_qp_probe_rust_for_unresolved"
+            else:
+                resolved = "rust"
+                resolution_reason = "native_kernel_selected"
+        else:
+            resolved = "python"
+            resolution_reason = "native_kernel_unavailable"
         finished.attrs["decepticonx_engine"] = resolved
         details: dict[str, Any] = {
             "backend_requested": backend_name,
+            "backend_effective": effective_backend,
+            "backend_resolved": resolved,
+            "solver_requested": solver_name,
             "native_available": native,
+            "native_eligible": native_eligible,
+            "backend_resolution_reason": resolution_reason,
         }
         fit_gof = getattr(result, "fit_gof", None)
         if isinstance(fit_gof, pd.DataFrame):
@@ -665,6 +709,7 @@ def run_backends(
     cibersort_engine: str = "rust",
     deconrnaseq_backend: str = "auto",
     epic_backend: str = "auto",
+    epic_solver: str = "auto",
     music_backend: str = "auto",
 ) -> tuple[dict[BranchKey, pd.DataFrame], dict[str, Any]]:
     """Run requested method/reference branches behind one stable contract.
@@ -774,6 +819,7 @@ def run_backends(
                         mrna_cell=epic_mrna_cell,
                         threads=threads,
                         backend_name=epic_backend,
+                        solver=epic_solver,
                     )
                 },
                 "epic",

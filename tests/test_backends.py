@@ -139,6 +139,7 @@ def test_epic_uses_only_in_memory_custom_reference_and_explicit_mapping(
 ) -> None:
     signature, bulk = matrices
     captured: dict[str, object] = {}
+    monkeypatch.delenv("EPIC_BACKEND", raising=False)
 
     class EpicReference:
         def __init__(self, **kwargs):
@@ -181,6 +182,7 @@ def test_epic_uses_only_in_memory_custom_reference_and_explicit_mapping(
         mrna_cell={"B": 1.5, "T": 2.5, "otherCells": 1.0},
         threads=4,
         backend_name="rust",
+        solver="nm",
     )
 
     ref_kwargs = captured["reference_kwargs"]
@@ -192,18 +194,202 @@ def test_epic_uses_only_in_memory_custom_reference_and_explicit_mapping(
     assert isinstance(epic_kwargs["reference"], EpicReference)
     assert epic_kwargs["mRNA_cell"] == {"B": 1.5, "T": 2.5, "otherCells": 1.0}
     assert epic_kwargs["withOtherCells"] is True
+    assert epic_kwargs["solver"] == "nm"
     assert epic_kwargs["backend"] == "rust"
     assert epic_kwargs["n_threads"] == 4
     assert list(estimate.index) == ["sample_a", "sample_b"]
     assert list(estimate.columns) == ["B", "T"]
     np.testing.assert_allclose(estimate.loc["sample_a"], [0.7, 0.2])
-    fit_payload = estimate.attrs["decepticonx_diagnostics"]["fit_gof"]
+    details = estimate.attrs["decepticonx_diagnostics"]
+    fit_payload = details["fit_gof"]
+    assert estimate.attrs["decepticonx_engine"] == "python"
+    assert details["backend_requested"] == "rust"
+    assert details["backend_effective"] == "rust"
+    assert details["backend_resolved"] == "python"
+    assert details["solver_requested"] == "nm"
+    assert details["native_eligible"] is False
+    assert details["backend_resolution_reason"] == "solver_python_only"
     assert fit_payload["columns"] == ["convergeCode", "convergeMessage"]
     assert fit_payload["records"][1] == {
         "sample": "sample_a",
         "convergeCode": 1,
         "convergeMessage": "iteration limit",
     }
+
+
+@pytest.mark.parametrize(
+    ("solver", "backend_name", "native", "expected", "reason"),
+    [
+        ("nm", "rust", True, "python", "solver_python_only"),
+        ("qp", "rust", True, "python", "solver_python_only"),
+        ("nmf", "rust", True, "rust", "native_kernel_selected"),
+        (
+            "auto",
+            "auto",
+            True,
+            "hybrid",
+            "python_qp_probe_rust_for_unresolved",
+        ),
+        ("nmf", "auto", False, "python", "native_kernel_unavailable"),
+        ("auto", "python", True, "python", "python_backend_selected"),
+    ],
+)
+def test_epic_diagnostics_describe_the_possible_execution_path(
+    monkeypatch: pytest.MonkeyPatch,
+    matrices: tuple[pd.DataFrame, pd.DataFrame],
+    solver: str,
+    backend_name: str,
+    native: bool,
+    expected: str,
+    reason: str,
+) -> None:
+    signature, bulk = matrices
+    monkeypatch.delenv("EPIC_BACKEND", raising=False)
+    monkeypatch.setattr(
+        "decepticonx.backends._native_available",
+        lambda method, module=None: native,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "epic_py",
+        SimpleNamespace(
+            EpicReference=lambda **kwargs: kwargs,
+            EPIC=lambda **kwargs: SimpleNamespace(
+                cellFractions=pd.DataFrame(
+                    [[0.7, 0.2], [0.2, 0.7]],
+                    index=["sample_b", "sample_a"],
+                    columns=["T", "B"],
+                )
+            ),
+        ),
+    )
+
+    estimate = run_epic(
+        signature,
+        bulk,
+        mrna_cell={"default": 1.0},
+        backend_name=backend_name,
+        solver=solver,
+    )
+
+    details = estimate.attrs["decepticonx_diagnostics"]
+    assert estimate.attrs["decepticonx_engine"] == expected
+    assert details["backend_requested"] == backend_name
+    assert details["backend_effective"] == backend_name
+    assert details["backend_resolved"] == expected
+    assert details["solver_requested"] == solver
+    assert details["native_available"] is native
+    assert details["native_eligible"] is (solver in {"auto", "nmf"})
+    assert details["backend_resolution_reason"] == reason
+
+
+def test_epic_diagnostics_preserve_request_when_environment_overrides_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    matrices: tuple[pd.DataFrame, pd.DataFrame],
+) -> None:
+    signature, bulk = matrices
+    monkeypatch.setenv("EPIC_BACKEND", "python")
+    monkeypatch.setattr(
+        "decepticonx.backends._native_available",
+        lambda method, module=None: True,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "epic_py",
+        SimpleNamespace(
+            EpicReference=lambda **kwargs: kwargs,
+            EPIC=lambda **kwargs: SimpleNamespace(
+                cellFractions=pd.DataFrame(
+                    [[0.7, 0.2], [0.2, 0.7]],
+                    index=["sample_b", "sample_a"],
+                    columns=["T", "B"],
+                )
+            ),
+        ),
+    )
+
+    estimate = run_epic(
+        signature,
+        bulk,
+        mrna_cell={"default": 1.0},
+        backend_name="rust",
+        solver="nmf",
+    )
+
+    details = estimate.attrs["decepticonx_diagnostics"]
+    assert details["backend_requested"] == "rust"
+    assert details["backend_effective"] == "python"
+    assert details["backend_resolved"] == "python"
+    assert details["backend_resolution_reason"] == "python_backend_selected"
+    assert estimate.attrs["decepticonx_engine"] == "python"
+
+
+def test_run_backends_forwards_epic_solver(
+    monkeypatch: pytest.MonkeyPatch,
+    matrices: tuple[pd.DataFrame, pd.DataFrame],
+) -> None:
+    signature, bulk = matrices
+    captured: dict[str, object] = {}
+
+    def epic_adapter(sig, mix, **kwargs):
+        captured.update(kwargs)
+        return pd.DataFrame(
+            [[0.6, 0.4], [0.3, 0.7]],
+            index=mix.columns,
+            columns=sig.columns,
+        )
+
+    monkeypatch.setattr("decepticonx.backends.run_epic", epic_adapter)
+    estimates, _ = run_backends(
+        {"music2": signature},
+        bulk,
+        methods=("epic",),
+        epic_mrna_cell={"default": 1.0},
+        epic_solver="qp",
+    )
+
+    assert BranchKey("epic", "music2") in estimates
+    assert captured["solver"] == "qp"
+
+
+def test_run_backends_records_epic_resolved_engine(
+    monkeypatch: pytest.MonkeyPatch,
+    matrices: tuple[pd.DataFrame, pd.DataFrame],
+) -> None:
+    signature, bulk = matrices
+    monkeypatch.delenv("EPIC_BACKEND", raising=False)
+    monkeypatch.setattr(
+        "decepticonx.backends._native_available",
+        lambda method, module=None: True,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "epic_py",
+        SimpleNamespace(
+            EpicReference=lambda **kwargs: kwargs,
+            EPIC=lambda **kwargs: SimpleNamespace(
+                cellFractions=pd.DataFrame(
+                    [[0.7, 0.2], [0.2, 0.7]],
+                    index=["sample_b", "sample_a"],
+                    columns=["T", "B"],
+                )
+            ),
+        ),
+    )
+
+    _, diagnostics = run_backends(
+        {"music2": signature},
+        bulk,
+        methods=("epic",),
+        epic_mrna_cell={"default": 1.0},
+        epic_backend="rust",
+        epic_solver="qp",
+    )
+
+    slug = "epic__music2"
+    assert diagnostics["engines"][slug] == "python"
+    assert diagnostics["branch_details"][slug]["backend_requested"] == "rust"
+    assert diagnostics["branch_details"][slug]["backend_resolved"] == "python"
 
 
 def test_deconrnaseq_preserves_gene_by_sample_direction_and_parameters(

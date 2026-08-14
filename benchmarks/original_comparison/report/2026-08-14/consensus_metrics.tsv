@@ -1,0 +1,4 @@
+comparison	scale	max_abs	mae	rmse	pearson_flat	median_per_cell_pearson
+r_vs_accelerated_frozen_refs	normalized	0.0853036604456143	0.004910853524461172	0.01110103136242183	0.9939222548231121	0.9984037621774561
+r_vs_accelerated_full_e2e	normalized	0.08437536241110813	0.005902069412001806	0.012069124942308483	0.9928302853868867	0.9963009662957594
+accelerated_nm_vs_auto_frozen_refs	raw_and_normalized	0.0	0.0	0.0	1.0	1.0
