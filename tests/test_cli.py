@@ -8,6 +8,26 @@ import pandas as pd
 from decepticonx import cli
 
 
+def test_run_cli_without_strategy_flags_uses_the_five_component_profile(
+    tmp_path,
+) -> None:
+    args = cli.build_parser().parse_args(
+        [
+            "run",
+            "cells.h5ad",
+            "bulk.tsv",
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    config = cli._config_from_arguments(args, run=True)
+
+    assert config.methods == ("cibersort", "deconrnaseq", "music")
+    assert config.references == ("bayesprism", "music2")
+    assert len(config.methods) * len(config.references) == 6
+
+
 def test_run_command_builds_config_and_forwards_output(monkeypatch, tmp_path, capsys) -> None:
     captured: dict[str, object] = {}
     consensus = pd.DataFrame([[0.4, 0.6]], index=["s1"], columns=["B", "T"])

@@ -25,6 +25,7 @@ from .exceptions import (
     BackendUnavailableError,
     InputValidationError,
 )
+from .models import DEFAULT_REFERENCES
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by type checkers
     from .io import PreparedSingleCell
@@ -281,7 +282,7 @@ def build_references(
     prepared: "PreparedSingleCell",
     bulk: pd.DataFrame,
     *,
-    references: Iterable[str] = REFERENCE_BUILDERS,
+    references: Iterable[str] = DEFAULT_REFERENCES,
     species: str = "hs",
     markers: Sequence[str] | None = None,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
@@ -295,6 +296,8 @@ def build_references(
         Bulk expression matrix with genes in rows and samples in columns.
     references:
         Any unique subset of ``bayesprism``, ``monocle3``, and ``music2``.
+        The default is ``bayesprism`` plus ``music2``; ``monocle3`` remains
+        available when requested explicitly.
     species:
         Currently only ``"hs"`` (human) is supported because the bundled
         BayesPrism annotations are human-specific.

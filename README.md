@@ -3,23 +3,26 @@
 An R-free, h5ad-first orchestration layer for a focused
 [DECEPTICONx](https://github.com/Hao-Zou-lab/DECEPTICONx) workflow.
 
-It keeps all three reference-construction strategies (BayesPrism,
-Monocle3, and MuSiC2-style), runs five independently installed accelerated
-deconvolution methods (CIBERSORT, CIBERSORT-ABS, EPIC, DeconRNASeq, and
-MuSiC), and produces a DECEPTICON-style cross-reference consensus. The core
-package is an adapter: it does not vendor algorithm implementations, native
-binaries, EPIC reference data, or licensed mRNA-per-cell values.
+It supports three reference-construction strategies (BayesPrism, Monocle3,
+and MuSiC2-style) and five independently installed accelerated deconvolution
+methods (CIBERSORT, CIBERSORT-ABS, EPIC, DeconRNASeq, and MuSiC). The default
+profile deliberately uses BayesPrism and MuSiC2 references with CIBERSORT,
+DeconRNASeq, and MuSiC, producing six DECEPTICON-style cross-reference
+branches. The core package is an adapter: it does not vendor algorithm
+implementations, native binaries, EPIC reference data, or licensed
+mRNA-per-cell values.
 
-> **Status: working alpha.** The end-to-end 3 x 5 branch path has been run in
-> the Omicos Python 3.11 environment with every optional native component
-> available. The supplied `simulation_data_human.zip` is not a valid accuracy
+> **Status: working alpha.** The end-to-end opt-in 3 x 5 branch path has been
+> run in the Omicos Python 3.11 environment. The supplied
+> `simulation_data_human.zip` is not a valid accuracy
 > oracle: its bulk matrix is truncated and its single-cell assay is normalized,
 > not raw counts. See [the data audit](docs/simulation-data-audit.md).
 
 中文要点：默认单细胞输入是标准 `h5ad`（cells x genes），默认严格要求原始
-counts；三个 ref 构造算法都保留，五个解卷积方法都可用。EPIC 因授权数据
-限制是显式启用项，必须由用户提供合法的 `mRNA_cell` 映射。测试 ZIP 目前
-只能做接口兼容性冒烟测试，不能据此宣称解卷积精度。
+counts；默认组合为 CIBERSORT、DeconRNASeq、MuSiC 三种解卷积方法与
+BayesPrism、MuSiC2 两种 ref，共六个分支。Monocle3、CIBERSORT-ABS 和
+EPIC 仍可显式启用；EPIC 必须由用户提供合法的 `mRNA_cell` 映射。测试 ZIP
+目前只能做接口兼容性冒烟测试，不能据此宣称解卷积精度。
 
 ## What is implemented
 
@@ -27,7 +30,7 @@ counts；三个 ref 构造算法都保留，五个解卷积方法都可用。EPI
 |---|---|
 | Reference construction | BayesPrism-style, Monocle3-style, corrected MuSiC2-style |
 | Deconvolution | CIBERSORT relative, CIBERSORT `sig.score` absolute, EPIC, DeconRNASeq, MuSiC |
-| Integration | Up to 15 method/reference branches and selectable R-literal/corrected cross-reference consensus |
+| Integration | Six default branches; up to 15 explicitly configured branches; selectable R-literal/corrected cross-reference consensus |
 | Inputs | Backed or in-memory h5ad plus strict genes-by-samples CSV/TSV/TXT bulk matrix |
 | Outputs | Every signature, every native branch estimate, mode-primary/unclosed/closed consensus, timings, provenance, warnings, engines, and fit diagnostics |
 
@@ -193,10 +196,13 @@ decepticonx validate cells.h5ad bulk.tsv \
   --sample-key donor
 ```
 
-The safe default runs BayesPrism/Monocle3/MuSiC2 references with CIBERSORT,
-CIBERSORT-ABS, DeconRNASeq, and MuSiC. EPIC is available but omitted from the
-default method list because it cannot run lawfully or reproducibly without an
-explicit mRNA-per-cell mapping.
+The default runs BayesPrism/MuSiC2 references with CIBERSORT, DeconRNASeq,
+and MuSiC: six branches in total. Monocle3, CIBERSORT-ABS, and EPIC remain
+available as explicit opt-ins. Keeping relative and absolute CIBERSORT out of
+the same default prevents the same fit from being counted as independent
+evidence, while excluding Monocle3 avoids the high-correlation
+Monocle3/MuSiC2 shortcut observed in the bundled validation benchmark. EPIC
+also requires an explicit, authorized mRNA-per-cell mapping.
 
 ```bash
 decepticonx run cells.h5ad bulk.tsv \
@@ -204,10 +210,17 @@ decepticonx run cells.h5ad bulk.tsv \
   --threads 8
 ```
 
-To run all five methods, create `config.json` with an authorized EPIC mapping:
+To opt into the complete three-reference/five-method compatibility matrix,
+create `config.json` with the optional components and an authorized EPIC
+mapping:
 
 ```json
 {
+  "references": [
+    "bayesprism",
+    "monocle3",
+    "music2"
+  ],
   "methods": [
     "cibersort",
     "cibersort_abs",
@@ -353,7 +366,6 @@ print(result.diagnostics["backends"]["engines"])
 results/
 ├── signatures/
 │   ├── bayesprism.tsv
-│   ├── monocle3.tsv
 │   └── music2.tsv
 ├── estimates/
 │   ├── cibersort__bayesprism.tsv
@@ -363,6 +375,9 @@ results/
 ├── consensus_closed.tsv
 └── run.json
 ```
+
+Explicitly requested Monocle3, CIBERSORT-ABS, or EPIC components add their
+corresponding signature or estimate files to this tree.
 
 `consensus.tsv` is the mode-primary view: it equals
 `consensus_unclosed.tsv` for the default `r_literal` mode and

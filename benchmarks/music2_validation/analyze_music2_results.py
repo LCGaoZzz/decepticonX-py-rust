@@ -395,7 +395,12 @@ def analyze(
         sample_key="donor",
         counts_layer="auto",
     )
-    rounded_refs, _ = build_references(prepared_rounded, bulk)
+    # This frozen benchmark intentionally reconstructs the historical 4 x 3
+    # matrix.  Keep its three-reference contract explicit so product-default
+    # changes cannot silently alter the rounding-sensitivity audit.
+    rounded_refs, _ = build_references(
+        prepared_rounded, bulk, references=EXPECTED_REFERENCES
+    )
     prepared_exact = prepare_single_cell(
         prepared_dir / "reference.h5ad",
         bulk,
@@ -404,7 +409,9 @@ def analyze(
         counts_layer="X",
         allow_normalized_x=True,
     )
-    exact_refs, _ = build_references(prepared_exact, bulk)
+    exact_refs, _ = build_references(
+        prepared_exact, bulk, references=EXPECTED_REFERENCES
+    )
     reference_sensitivity: dict[str, dict[str, float]] = {}
     for name, rounded in rounded_refs.items():
         exact = exact_refs[name].loc[rounded.index, rounded.columns]

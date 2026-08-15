@@ -117,7 +117,10 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
         nargs="+",
         default=None,
         metavar="NAME[,NAME...]",
-        help="method(s) to run; repeat or provide a comma-separated list",
+        help=(
+            "method(s) to run; default: cibersort,deconrnaseq,music; "
+            "cibersort_abs and epic remain explicit opt-ins"
+        ),
     )
     parser.add_argument(
         "--reference",
@@ -126,7 +129,10 @@ def _add_run_options(parser: argparse.ArgumentParser) -> None:
         nargs="+",
         default=None,
         metavar="NAME[,NAME...]",
-        help="reference builder(s); repeat or provide a comma-separated list",
+        help=(
+            "reference builder(s); default: bayesprism,music2; "
+            "monocle3 remains an explicit opt-in"
+        ),
     )
     qn = parser.add_mutually_exclusive_group()
     qn.add_argument(
