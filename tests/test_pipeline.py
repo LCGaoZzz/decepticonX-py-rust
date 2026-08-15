@@ -382,5 +382,20 @@ def test_result_write_refuses_a_nonempty_output_directory(tmp_path) -> None:
         result.write(output)
 
 
-def test_default_methods_are_runnable_without_licensed_epic_data() -> None:
-    assert "epic" not in PipelineConfig().methods
+def test_default_profile_is_the_six_requested_branches() -> None:
+    config = PipelineConfig()
+
+    assert config.methods == ("cibersort", "deconrnaseq", "music")
+    assert config.references == ("bayesprism", "music2")
+    assert {
+        BranchKey(method, reference)
+        for method in config.methods
+        for reference in config.references
+    } == {
+        BranchKey("cibersort", "bayesprism"),
+        BranchKey("cibersort", "music2"),
+        BranchKey("deconrnaseq", "bayesprism"),
+        BranchKey("deconrnaseq", "music2"),
+        BranchKey("music", "bayesprism"),
+        BranchKey("music", "music2"),
+    }

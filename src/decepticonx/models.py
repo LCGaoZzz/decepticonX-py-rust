@@ -10,6 +10,10 @@ from typing import Any, Mapping
 import pandas as pd
 
 
+DEFAULT_METHODS = ("cibersort", "deconrnaseq", "music")
+DEFAULT_REFERENCES = ("bayesprism", "music2")
+
+
 @dataclass(frozen=True, order=True, slots=True)
 class BranchKey:
     """A deconvolution algorithm applied to one reference template."""
@@ -33,13 +37,8 @@ class PipelineConfig:
     exclude_cell_types: tuple[str, ...] = ()
     allow_normalized_x: bool = False
     species: str = "hs"
-    methods: tuple[str, ...] = (
-        "cibersort",
-        "cibersort_abs",
-        "deconrnaseq",
-        "music",
-    )
-    references: tuple[str, ...] = ("bayesprism", "monocle3", "music2")
+    methods: tuple[str, ...] = DEFAULT_METHODS
+    references: tuple[str, ...] = DEFAULT_REFERENCES
     cibersort_qn: bool = True
     cibersort_seed: int = 0
     threads: int = 1

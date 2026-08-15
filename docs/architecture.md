@@ -5,8 +5,9 @@ The pipeline has four explicit stages:
 1. Validate a genes-by-samples bulk matrix and an h5ad single-cell object.
 2. Materialize only bulk-overlapping single-cell genes plus a synthetic
    remainder feature that preserves each cell's full library total.
-3. Build three reference matrices, verify a common identifiable cell-type
-   schema, and run five optional deconvolution methods.
+3. By default, build two reference matrices and run three deconvolution
+   methods, verifying a common identifiable cell-type schema. A third
+   reference and two additional methods remain explicit compatibility options.
 4. Select strategies from native target estimates, aggregate branch
    compositions, and emit mode-primary, unclosed, and closed consensus views
    while preserving every native branch result.
@@ -32,12 +33,18 @@ an explicit unscaled custom-reference approximation and is not represented as
 equivalent to the official EPIC/R `mRNA_cell_default`. A uniform default of 1
 is not the default used by the original R implementation.
 
-EPIC is therefore supported but omitted from the default method tuple. A run
-that explicitly requests EPIC without `epic_mrna_cell` fails during
-configuration preflight, before bulk loading or reference construction.
-Explicit backend selectors allow callers to require Rust rather than accept an
-`auto` fallback; requested/resolved engines and native availability are saved
-per branch.
+The default profile is CIBERSORT, DeconRNASeq, and MuSiC across BayesPrism and
+MuSiC2 references (six branches). CIBERSORT-ABS, EPIC, and Monocle3 remain
+supported when explicitly requested. Omitting CIBERSORT-ABS from the default
+avoids treating two outputs from the same CIBERSORT fit as independent
+evidence. Omitting Monocle3 avoids the high-correlation Monocle3/MuSiC2
+selection shortcut seen in the bundled validation benchmark.
+
+EPIC is supported but not selected by default. A run that explicitly requests
+EPIC without `epic_mrna_cell` fails during configuration preflight, before
+bulk loading or reference construction. Explicit backend selectors allow
+callers to require Rust rather than accept an `auto` fallback;
+requested/resolved engines and native availability are saved per branch.
 
 EPIC is run with `withOtherCells=True`. The returned `otherCells` compartment
 is preserved in the native branch artifact. It is not a consensus target, but

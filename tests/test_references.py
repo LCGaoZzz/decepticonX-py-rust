@@ -141,6 +141,23 @@ def test_remainder_visibility_is_builder_specific(
     assert references["monocle3"].index.tolist() == ["g2", "g1"]
 
 
+def test_default_build_uses_bayesprism_and_music2_only(
+    monkeypatch: pytest.MonkeyPatch, prepared_fixture: PreparedSingleCell
+) -> None:
+    calls: dict = {}
+    _install_fake_fast(monkeypatch, calls)
+    bulk = pd.DataFrame(
+        [[1.0], [1.0]], index=["g2", "g1"], columns=["s1"]
+    )
+
+    references, diagnostics = build_references(prepared_fixture, bulk)
+
+    assert tuple(references) == ("bayesprism", "music2")
+    assert tuple(diagnostics["references"]) == ("bayesprism", "music2")
+    assert "bayesprism" in calls
+    assert "monocle3" not in calls
+
+
 def test_only_hs_species_is_accepted(
     monkeypatch: pytest.MonkeyPatch, prepared_fixture: PreparedSingleCell
 ) -> None:

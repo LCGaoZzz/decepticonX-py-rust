@@ -381,7 +381,7 @@ def run_decepticonx(
     config: PipelineConfig | Mapping[str, Any] | None = None,
     output_dir: str | Path | None = None,
 ) -> DecepticonXResult:
-    """Run reference construction, five-method deconvolution, and consensus.
+    """Run configured reference construction, deconvolution, and consensus.
 
     Parameters
     ----------
